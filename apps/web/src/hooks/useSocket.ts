@@ -6,7 +6,7 @@ import { useAuthStore, useSocketStore } from '@/store';
 export function useSocket() {
   const socketRef = useRef<Socket | null>(null);
   const { user } = useAuthStore();
-  const { setConnected, setQueueStats, setSocket, pushCrawlPageActivity } = useSocketStore();
+  const { setConnected, setQueueStats, setSocket, pushCrawlPageActivity, pushErrorLog } = useSocketStore();
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -48,6 +48,25 @@ export function useSocket() {
       queryClient.invalidateQueries({ queryKey: ['site', payload.siteId, 'ideas'] });
       queryClient.invalidateQueries({ queryKey: ['idea'] });
       queryClient.invalidateQueries({ queryKey: ['sites'] });
+      queryClient.invalidateQueries({ queryKey: ['ideas', 'kanban'] });
+      queryClient.invalidateQueries({ queryKey: ['ideas', 'stats'] });
+    });
+
+    socket.on('idea.updated', (payload: { siteId: string; ideaId?: string }) => {
+      queryClient.invalidateQueries({ queryKey: ['ideas'] });
+      queryClient.invalidateQueries({ queryKey: ['site', payload.siteId, 'ideas'] });
+      if (payload.ideaId) queryClient.invalidateQueries({ queryKey: ['idea', payload.ideaId] });
+      queryClient.invalidateQueries({ queryKey: ['ideas', 'kanban'] });
+      queryClient.invalidateQueries({ queryKey: ['ideas', 'stats'] });
+    });
+
+    socket.on('error.new', (payload: { siteId: string; type: string; message: string }) => {
+      pushErrorLog({
+        siteId: payload.siteId,
+        type: payload.type,
+        message: payload.message,
+      });
+      queryClient.invalidateQueries({ queryKey: ['dashboard', 'crawl-errors'] });
     });
 
     return () => {
@@ -55,7 +74,7 @@ export function useSocket() {
       setConnected(false);
       setSocket(null);
     };
-  }, [user?.orgId, setConnected, setQueueStats, setSocket, pushCrawlPageActivity, queryClient]);
+  }, [user?.orgId, setConnected, setQueueStats, setSocket, pushCrawlPageActivity, pushErrorLog, queryClient]);
 
   return socketRef;
 }

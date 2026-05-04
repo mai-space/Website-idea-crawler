@@ -1,7 +1,7 @@
 # Sitebrief — Agent Handover
 
 > Last updated: 2026-05-04  
-> Completed through: **Phase 3 — Ideas Engine**
+> Completed through: **Phase 5 — Scheduling & Automation** (with Phase 4 dashboard scope)
 
 ---
 
@@ -27,19 +27,25 @@ Design system: `Sitebrief Design System/` — read `Sitebrief Design System/READ
 │   │   └── src/
 │   │       ├── auth/         JWT login/register/me
 │   │       ├── sites/        Sites CRUD (org-scoped)
-│   │       ├── crawler/      BullMQ crawl + parse + ideas queues, processors, DTOs, ideas.service
+│   │       ├── crawler/      Queues, crawl/parse/ideas processors, scheduler, export wiring
+│   │       ├── export/       Org-wide export controller
+│   │       ├── dashboard/    Crawl error feed API
+│   │       ├── notifications/ Webhook notifier for new ideas
 │   │       ├── events/       Socket.io WebSocket gateway
 │   │       └── prisma/       Global PrismaService
 │   └── web/                  React 18 + Vite + TypeScript frontend
 │       └── src/
 │           ├── api/client.ts Axios instance + shared types
-│           ├── store/        Zustand: auth + socket + crawl activity buffer
+│           ├── store/        Zustand: auth + socket + activity + error log + toasts
 │           ├── hooks/        useAuth, useSocket
 │           ├── pages/        LoginPage, DashboardPage
 │           └── components/
-│               ├── layout/   Sidebar, Topbar
+│               ├── layout/   Sidebar, Topbar, CommandPalette
 │               ├── sites/    SiteFleet, SiteTile, SiteDetailDrawer, PageTypeIcon
-│               ├── ideas/    PitchCard, IdeaDetailModal, IdeasPanel
+│               ├── ideas/    PitchCard, IdeaDetailModal, IdeasPanel, IdeasKanbanBoard
+│               ├── dashboard/ ActivityFeed (virtualized), ErrorConsole
+│               ├── export/   ExportDialog (JSON/CSV + client PDF)
+│               ├── ui/       Toaster
 │               └── queue/    QueueMonitor
 ├── docker-compose.yml        PostgreSQL 16 (pgvector) + Redis 7
 ├── .env.example              Copy to .env before first run
@@ -122,6 +128,12 @@ Auth: `Authorization: Bearer <jwt>` on all routes except `/auth/login` and `/aut
 | GET | `/ideas` | Org-wide ideas; same query params + optional `site_id` (must belong to org) |
 | GET | `/ideas/:id` | Full pitch briefing + `sourcePages`, `reasoning`, `cmsHint`, `displayHours` |
 | PATCH | `/ideas/:id` | `{ status?, notes?, customHours? }` |
+| GET | `/ideas/stats` | Org aggregates: `total`, `openHighImpact`, `byStatus`, `byComplexity` |
+| POST | `/ideas/bulk` | `{ ids: uuid[], status }` — max 100 ideas, org-scoped |
+| GET | `/export` | `?format=json\|csv` + optional `site_id`, `status`, `complexity`, `limit` |
+| GET | `/sites/:siteId/export` | Same filters, scoped to one site |
+| GET | `/dashboard/crawl-errors` | Recent crawl job error entries for the org |
+| PATCH | `/sites/:id` | Adds `scheduleEnabled`, `scheduleCron` (cron-parser v5 / six-field; five-field accepted with `0` sec prefix server-side) |
 
 ---
 
@@ -137,6 +149,7 @@ Emit `subscribe:site` with a `siteId` string to join `site:<siteId>` (used by th
 | `queue.stats` | Server → Client | `{ crawl, parse, ideas, workers }` |
 | `error.new` | Server → Client | `{ siteId, type, message, retryable }` — includes `parse_error`, `ideas_error` |
 | `idea.new` | Server → Client | `{ ideaId, siteId, title }` — to `org:<orgId>` and `site:<siteId>` |
+| `idea.updated` | Server → Client | `{ ideaId, siteId, status?, customHours? }` — after `PATCH /ideas/:id` |
 
 ---
 
@@ -147,8 +160,8 @@ Emit `subscribe:site` with a `siteId` string to join `site:<siteId>` (used by th
 | **1 — Multi-Site Foundation** | W1–3 | **Done** | Crawler, auth, sites CRUD, WebSocket, dashboard UI |
 | **2 — Parse & Embed Pipeline** | W4–6 | **Done** | `parse-queue`, HTML extract/clean/classify, OpenAI embed, pgvector + HNSW, pages `?type=`, site drawer + activity + crawl timeline |
 | **3 — Ideas Engine** | W7–10 | **Done** | `ideas-queue` (2 workers), GPT-4o JSON briefs, embed + dedup (0.92), REST + Briefs tab + `IdeasPanel` + `idea.new` |
-| **4 — Dashboard v2 + Realtime** | W11–13 | Not started | |
-| **5 — Scheduling & Automation** | W14–15 | Not started | |
+| **4 — Dashboard v2 + Realtime** | W11–13 | **Done** | `GET /ideas/stats`, `POST /ideas/bulk`, exports, virtual activity, error console + re-crawl, Kanban (dnd-kit) + bulk, toasts, ⌘K palette, client PDF |
+| **5 — Scheduling & Automation** | W14–15 | **Done** | `Site.schedule*`, `CrawlSchedulerService` (minute tick), content-hash skip re-parse, Slack/generic webhooks on new ideas |
 
 ---
 
@@ -170,11 +183,14 @@ Emit `subscribe:site` with a `siteId` string to join `site:<siteId>` (used by th
 
 ---
 
-## Phase 4 — what to build next
+## Phase 4–5 — implementation notes (for maintainers)
 
-**Goal:** Full dashboard UX, exports, richer realtime (see `project-plan.md` §9 Phase 4).
-
-- Org-wide `GET /ideas` aggregation polish, export JSON/CSV/PDF, activity stream virtualization, Kanban board, manual hours UX, remaining WebSocket coverage.
+- **Exports:** `ExportModule` + `GET /export` and `GET /sites/:siteId/export` return JSON rows or `{ format: 'csv', content }`. PDF pitch packs are generated in the browser (`jspdf`) via `ExportDialog`.
+- **Ideas UX:** `GET /ideas/stats`, `POST /ideas/bulk`, `idea.updated` socket, `IdeasKanbanBoard` (drag column = status), manual hours in `IdeaDetailModal`, `Toaster` + `useToastStore`.
+- **Activity / errors:** `@tanstack/react-virtual` for the crawl activity list; `error.new` also pushes into Zustand `errorLog`; `GET /dashboard/crawl-errors` lists persisted job errors.
+- **Scheduling:** `@nestjs/schedule` + `cron-parser` v5 (`CronExpressionParser`); `Site.scheduleEnabled`, `scheduleCron`, `nextCrawlAt`; `CrawlSchedulerService` runs scheduled crawls with `JobTrigger.scheduled`.
+- **Change detection:** `crawl.processor` skips parse when `contentHash` unchanged and `parsedAt` is set; clears `embedding` when HTML changes.
+- **Notifications:** `NotifierService` POSTs JSON to `SLACK_WEBHOOK_URL` and/or `NOTIFY_WEBHOOK_URL` when a new idea is stored.
 
 ---
 
@@ -206,7 +222,11 @@ Existing React components to extend (not rewrite):
 | `apps/api/src/crawler/crawl.processor.ts` | Crawl + enqueue parse |
 | `apps/api/src/crawler/parse.processor.ts` | Parse/embed pipeline |
 | `apps/api/src/crawler/ideas.processor.ts` | Ideas pipeline (GPT + dedup) |
-| `apps/api/src/crawler/ideas.service.ts` | Ideas REST + enqueue |
+| `apps/api/src/crawler/ideas.service.ts` | Ideas REST + enqueue + stats + bulk |
+| `apps/api/src/crawler/crawl-scheduler.service.ts` | Scheduled crawl tick |
+| `apps/api/src/export/export.controller.ts` | Org export |
+| `apps/api/src/dashboard/dashboard.controller.ts` | Crawl error feed |
+| `apps/api/src/notifications/notifier.service.ts` | Slack / generic webhooks |
 | `apps/api/src/crawler/html-parse.ts` | Extract + clean rules |
 | `apps/api/src/crawler/page-classifier.ts` | Page type heuristics |
 | `apps/api/prisma/schema.prisma` | Models + pgvector fields |

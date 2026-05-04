@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
+import { computeNextCrawlAt, isValidCronExpression } from '../crawler/cron.util';
 
 @Injectable()
 export class SitesService {
@@ -42,8 +43,33 @@ export class SitesService {
   }
 
   async update(orgId: string, id: string, dto: UpdateSiteDto) {
-    await this.assertOwnership(orgId, id);
-    return this.prisma.site.update({ where: { id }, data: dto });
+    const prev = await this.assertOwnership(orgId, id);
+    const scheduleTouched = dto.scheduleEnabled !== undefined || dto.scheduleCron !== undefined;
+    const enabled = dto.scheduleEnabled ?? prev.scheduleEnabled;
+    const cronRaw = dto.scheduleCron !== undefined ? dto.scheduleCron : prev.scheduleCron;
+    const cron = cronRaw?.trim() || null;
+
+    let nextCrawlAt: Date | null | undefined = undefined;
+    if (scheduleTouched) {
+      if (enabled) {
+        if (!cron) throw new BadRequestException('scheduleCron is required when scheduleEnabled is true');
+        if (!isValidCronExpression(cron)) throw new BadRequestException('Invalid scheduleCron expression');
+        nextCrawlAt = computeNextCrawlAt(cron, new Date());
+      } else {
+        nextCrawlAt = null;
+      }
+    }
+
+    const { scheduleEnabled, scheduleCron, ...rest } = dto;
+    return this.prisma.site.update({
+      where: { id },
+      data: {
+        ...rest,
+        ...(scheduleEnabled !== undefined ? { scheduleEnabled } : {}),
+        ...(dto.scheduleCron !== undefined ? { scheduleCron: cron } : {}),
+        ...(nextCrawlAt !== undefined ? { nextCrawlAt } : {}),
+      },
+    });
   }
 
   async remove(orgId: string, id: string) {

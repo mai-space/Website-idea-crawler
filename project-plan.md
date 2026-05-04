@@ -760,6 +760,8 @@ Phase 1 ──── Phase 2 ──── Phase 3 ──── Phase 4 ───
 
 ### Phase 4 — Dashboard v2 + Realtime *(Wochen 11–13)*
 
+> **Umsetzungsstatus (Repo):** Kern umgesetzt — Export, Stats, Kanban, Activity, Error-Console, Toasts, Command Palette; vgl. `plan.md`.
+
 **Ziel:** Vollständiges Dashboard, alle UX-Anforderungen
 
 **Backend:**
@@ -781,6 +783,8 @@ Phase 1 ──── Phase 2 ──── Phase 3 ──── Phase 4 ───
 ---
 
 ### Phase 5 — Scheduling & Automation *(Wochen 14–15)*
+
+> **Umsetzungsstatus (Repo):** Kern umgesetzt — Cron pro Site, Hash-basiertes Re-Parse, Webhooks; vgl. `plan.md`.
 
 **Ziel:** Automatische Crawls, Change Detection, Notifications
 

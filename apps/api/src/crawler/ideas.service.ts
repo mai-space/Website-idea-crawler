@@ -8,10 +8,12 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { IdeaComplexity, IdeaStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventsGateway } from '../events/events.gateway';
 import { QueueStatsEmitter } from './queue-stats.emitter';
 import { IDEAS_QUEUE, type GenerateIdeasJob } from './ideas.constants';
 import type { ListIdeasQueryDto } from './dto/list-ideas-query.dto';
 import type { PatchIdeaDto } from './dto/patch-idea.dto';
+import type { BulkIdeasDto } from './dto/bulk-ideas.dto';
 
 @Injectable()
 export class IdeasService {
@@ -19,6 +21,7 @@ export class IdeasService {
     private readonly prisma: PrismaService,
     @InjectQueue(IDEAS_QUEUE) private readonly ideasQueue: Queue,
     private readonly queueStats: QueueStatsEmitter,
+    private readonly events: EventsGateway,
   ) {}
 
   async enqueueGenerate(orgId: string, siteId: string) {
@@ -157,6 +160,55 @@ export class IdeasService {
     return { items, total, page, limit };
   }
 
+  async getOrgStats(orgId: string) {
+    const where: Prisma.IdeaWhereInput = { site: { orgId } };
+    const [total, byStatus, byComplexity, openHighImpact] = await Promise.all([
+      this.prisma.idea.count({ where }),
+      this.prisma.idea.groupBy({
+        by: ['status'],
+        where,
+        _count: { _all: true },
+      }),
+      this.prisma.idea.groupBy({
+        by: ['complexity'],
+        where,
+        _count: { _all: true },
+      }),
+      this.prisma.idea.count({
+        where: { site: { orgId }, status: 'open', impactScore: { gte: 0.7 } },
+      }),
+    ]);
+
+    return {
+      total,
+      openHighImpact,
+      byStatus: Object.fromEntries(byStatus.map((r) => [r.status, r._count._all])),
+      byComplexity: Object.fromEntries(byComplexity.map((r) => [r.complexity, r._count._all])),
+    };
+  }
+
+  async bulkSetStatus(orgId: string, dto: BulkIdeasDto) {
+    const ideas = await this.prisma.idea.findMany({
+      where: { id: { in: dto.ids }, site: { orgId } },
+      select: { id: true, siteId: true },
+    });
+    if (ideas.length !== dto.ids.length) {
+      throw new BadRequestException('One or more ideas were not found in your organization');
+    }
+    await this.prisma.idea.updateMany({
+      where: { id: { in: dto.ids } },
+      data: { status: dto.status },
+    });
+    for (const row of ideas) {
+      this.events.emitIdeaUpdated(orgId, {
+        ideaId: row.id,
+        siteId: row.siteId,
+        status: dto.status,
+      });
+    }
+    return { updated: ideas.length };
+  }
+
   async getDetail(orgId: string, ideaId: string) {
     const idea = await this.prisma.idea.findUnique({
       where: { id: ideaId },
@@ -239,7 +291,7 @@ export class IdeasService {
     if (dto.notes !== undefined) data.notes = dto.notes;
     if (dto.customHours !== undefined) data.customHours = dto.customHours;
 
-    return this.prisma.idea.update({
+    const updated = await this.prisma.idea.update({
       where: { id: ideaId },
       data,
       select: {
@@ -260,5 +312,14 @@ export class IdeasService {
         generatedAt: true,
       },
     });
+
+    this.events.emitIdeaUpdated(orgId, {
+      ideaId: updated.id,
+      siteId: updated.siteId,
+      status: updated.status,
+      customHours: updated.customHours,
+    });
+
+    return updated;
   }
 }

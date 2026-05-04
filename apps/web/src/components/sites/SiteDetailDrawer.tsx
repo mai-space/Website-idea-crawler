@@ -11,6 +11,7 @@ import type {
   Site,
 } from '@/api/client';
 import { useSocketStore } from '@/store';
+import { useToastStore } from '@/store/toastStore';
 import { PageTypeIcon } from './PageTypeIcon';
 import { PitchCard } from '@/components/ideas/PitchCard';
 import { IdeaDetailModal } from '@/components/ideas/IdeaDetailModal';
@@ -41,7 +42,10 @@ type IdeaArea = 'content' | 'seo' | 'feature' | 'ux';
 
 export function SiteDetailDrawer({ siteId, onClose }: Props) {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'pages' | 'history' | 'briefs'>('pages');
+  const pushToast = useToastStore((s) => s.pushToast);
+  const [tab, setTab] = useState<'pages' | 'history' | 'briefs' | 'schedule'>('pages');
+  const [cronDraft, setCronDraft] = useState('0 0 4 * * *');
+  const [schedEnabled, setSchedEnabled] = useState(false);
   const [typeFilter, setTypeFilter] = useState<PageType | null>(null);
   const [detailIdeaId, setDetailIdeaId] = useState<string | null>(null);
   const [ideaStatus, setIdeaStatus] = useState<IdeaStatus | null>(null);
@@ -76,6 +80,12 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
     enabled: Boolean(siteId),
   });
 
+  useEffect(() => {
+    if (!site) return;
+    setSchedEnabled(Boolean(site.scheduleEnabled));
+    setCronDraft(site.scheduleCron?.trim() || '0 0 4 * * *');
+  }, [site?.id, site?.scheduleCron, site?.scheduleEnabled]);
+
   const pagesQueryKey = ['site', siteId, 'pages', typeFilter ?? 'all'] as const;
 
   const { data: pages, isLoading: pagesLoading } = useQuery({
@@ -104,11 +114,29 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
   const generateIdeas = useMutation({
     mutationFn: () => api.post<{ jobId: string; status: string }>(`/sites/${siteId}/ideas/generate`, {}),
     onSuccess: () => {
+      pushToast('Idea generation queued', 'success');
       qc.invalidateQueries({ queryKey: ['sites'] });
       qc.invalidateQueries({ queryKey: ['site', siteId] });
       qc.invalidateQueries({ queryKey: ['site', siteId, 'ideas'] });
       qc.invalidateQueries({ queryKey: ['ideas'] });
+      qc.invalidateQueries({ queryKey: ['ideas', 'stats'] });
     },
+    onError: () => pushToast('Could not start idea generation', 'error'),
+  });
+
+  const patchSiteSchedule = useMutation({
+    mutationFn: () =>
+      api.patch(
+        `/sites/${siteId}`,
+        schedEnabled ? { scheduleEnabled: true, scheduleCron: cronDraft.trim() } : { scheduleEnabled: false },
+      ),
+    onSuccess: () => {
+      pushToast('Schedule saved', 'success');
+      qc.invalidateQueries({ queryKey: ['sites'] });
+      qc.invalidateQueries({ queryKey: ['site', siteId] });
+      qc.invalidateQueries({ queryKey: ['ideas', 'stats'] });
+    },
+    onError: () => pushToast('Invalid cron or conflict', 'error'),
   });
 
   const patchIdeaStatus = useMutation({
@@ -210,7 +238,7 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 16 }}>
-            {(['pages', 'history', 'briefs'] as const).map((t) => (
+            {(['pages', 'history', 'briefs', 'schedule'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -228,7 +256,7 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
                   textTransform: 'capitalize',
                 }}
               >
-                {t === 'pages' ? 'Pages' : t === 'history' ? 'Crawl history' : 'Briefs'}
+                {t === 'pages' ? 'Pages' : t === 'history' ? 'Crawl history' : t === 'briefs' ? 'Briefs' : 'Schedule'}
               </button>
             ))}
           </div>
@@ -426,6 +454,81 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
                 </div>
               )}
             </>
+          )}
+
+          {tab === 'schedule' && site && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55, margin: 0 }}>
+                Automated crawls use a six-field cron (second minute hour day month weekday), UTC.
+                Classic five-field expressions are accepted by the API (seconds default to 0).
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--ink-2)' }}>
+                <input type="checkbox" checked={schedEnabled} onChange={(e) => setSchedEnabled(e.target.checked)} />
+                Enable scheduled crawl
+              </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {[
+                  { label: 'Daily 04:00', cron: '0 0 4 * * *' },
+                  { label: 'Weekly Mon 05:00', cron: '0 0 5 * * 1' },
+                  { label: 'Hourly', cron: '0 0 * * * *' },
+                ].map((p) => (
+                  <button
+                    key={p.label}
+                    type="button"
+                    onClick={() => { setCronDraft(p.cron); setSchedEnabled(true); }}
+                    style={{
+                      fontSize: 11,
+                      padding: '5px 10px',
+                      borderRadius: 999,
+                      border: '1px solid var(--rule)',
+                      background: 'var(--paper-0)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink-2)' }}>Cron expression</span>
+                <input
+                  value={cronDraft}
+                  onChange={(e) => setCronDraft(e.target.value)}
+                  disabled={!schedEnabled}
+                  style={{
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 12,
+                    padding: 10,
+                    borderRadius: 'var(--r-md)',
+                    border: '1px solid var(--rule)',
+                    background: 'var(--paper-0)',
+                  }}
+                />
+              </label>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                Next run:{' '}
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--ink-2)' }}>
+                  {site.nextCrawlAt ? new Date(site.nextCrawlAt).toLocaleString() : '—'}
+                </span>
+              </div>
+              <button
+                type="button"
+                disabled={patchSiteSchedule.isPending}
+                onClick={() => patchSiteSchedule.mutate()}
+                style={{
+                  alignSelf: 'flex-start',
+                  padding: '8px 16px',
+                  borderRadius: 'var(--r-md)',
+                  border: '1px solid var(--rule)',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                {patchSiteSchedule.isPending ? 'Saving…' : 'Save schedule'}
+              </button>
+            </div>
           )}
         </div>
       </aside>

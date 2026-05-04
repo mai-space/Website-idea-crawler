@@ -45,4 +45,12 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(`org:${orgId}`).emit('idea.new', payload);
     this.server.to(`site:${payload.siteId}`).emit('idea.new', payload);
   }
+
+  emitIdeaUpdated(
+    orgId: string,
+    payload: { ideaId: string; siteId: string; status?: string; customHours?: number | null },
+  ) {
+    this.server.to(`org:${orgId}`).emit('idea.updated', payload);
+    this.server.to(`site:${payload.siteId}`).emit('idea.updated', payload);
+  }
 }

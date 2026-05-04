@@ -36,29 +36,44 @@ export interface CrawlPageActivity {
   at: number;
 }
 
+export interface ErrorLogEntry {
+  siteId: string;
+  type: string;
+  message: string;
+  at: number;
+}
+
 interface SocketState {
   connected: boolean;
   socket: Socket | null;
   queueStats: QueueStats;
   crawlPageActivity: CrawlPageActivity[];
+  errorLog: ErrorLogEntry[];
   setConnected: (v: boolean) => void;
   setSocket: (s: Socket | null) => void;
   setQueueStats: (s: QueueStats) => void;
   pushCrawlPageActivity: (e: Omit<CrawlPageActivity, 'at'>) => void;
+  pushErrorLog: (e: Omit<ErrorLogEntry, 'at'>) => void;
 }
 
 const MAX_ACTIVITY = 200;
+const MAX_ERRORS = 80;
 
 export const useSocketStore = create<SocketState>((set) => ({
   connected: false,
   socket: null,
   queueStats: { crawl: 0, parse: 0, ideas: 0, workers: 10 },
   crawlPageActivity: [],
+  errorLog: [],
   setConnected: (connected) => set({ connected }),
   setSocket: (socket) => set({ socket }),
   setQueueStats: (queueStats) => set({ queueStats }),
   pushCrawlPageActivity: (e) =>
     set((s) => ({
       crawlPageActivity: [{ ...e, at: Date.now() }, ...s.crawlPageActivity].slice(0, MAX_ACTIVITY),
+    })),
+  pushErrorLog: (e) =>
+    set((s) => ({
+      errorLog: [{ ...e, at: Date.now() }, ...s.errorLog].slice(0, MAX_ERRORS),
     })),
 }));

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import type { IdeaDetail, PageType } from '@/api/client';
 import { PageTypeIcon } from '@/components/sites/PageTypeIcon';
+import { useToastStore } from '@/store/toastStore';
 
 interface Props {
   ideaId: string | null;
@@ -11,7 +12,9 @@ interface Props {
 
 export function IdeaDetailModal({ ideaId, onClose }: Props) {
   const qc = useQueryClient();
+  const pushToast = useToastStore((s) => s.pushToast);
   const [notesDraft, setNotesDraft] = useState('');
+  const [hoursDraft, setHoursDraft] = useState('');
 
   const { data: idea, isLoading } = useQuery({
     queryKey: ['idea', ideaId],
@@ -22,7 +25,8 @@ export function IdeaDetailModal({ ideaId, onClose }: Props) {
   useEffect(() => {
     if (idea?.notes != null) setNotesDraft(idea.notes);
     else setNotesDraft('');
-  }, [idea?.notes, ideaId]);
+    if (idea) setHoursDraft(String(idea.customHours ?? idea.estimatedHours));
+  }, [idea?.notes, idea?.customHours, idea?.estimatedHours, ideaId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -33,14 +37,18 @@ export function IdeaDetailModal({ ideaId, onClose }: Props) {
   }, [onClose]);
 
   const patch = useMutation({
-    mutationFn: (body: { status?: IdeaDetail['status']; notes?: string }) =>
+    mutationFn: (body: { status?: IdeaDetail['status']; notes?: string; customHours?: number }) =>
       api.patch(`/ideas/${ideaId}`, body).then((r) => r.data),
     onSuccess: () => {
+      pushToast('Brief updated', 'success');
       qc.invalidateQueries({ queryKey: ['idea', ideaId] });
       qc.invalidateQueries({ queryKey: ['ideas'] });
+      qc.invalidateQueries({ queryKey: ['ideas', 'stats'] });
+      qc.invalidateQueries({ queryKey: ['ideas', 'kanban'] });
       if (idea?.siteId) qc.invalidateQueries({ queryKey: ['site', idea.siteId, 'ideas'] });
       qc.invalidateQueries({ queryKey: ['sites'] });
     },
+    onError: () => pushToast('Update failed', 'error'),
   });
 
   if (!ideaId) return null;
@@ -130,9 +138,45 @@ export function IdeaDetailModal({ ideaId, onClose }: Props) {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-2)' }}>
               <span>{idea.complexity}</span>
               <span>{idea.displayHours}h estimated</span>
+              {idea.customHours != null && <span style={{ color: 'var(--ink-3)' }}>manual</span>}
               <span>impact {idea.impactScore.toFixed(2)}</span>
               <span style={{ textTransform: 'lowercase' }}>{idea.status}</span>
             </div>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)' }}>Manual hours</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={hoursDraft}
+                  onChange={(e) => setHoursDraft(e.target.value)}
+                  style={{
+                    width: 100,
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 13,
+                    padding: 8,
+                    borderRadius: 'var(--r-md)',
+                    border: '1px solid var(--rule)',
+                    background: 'var(--paper-0)',
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={patch.isPending || Number(hoursDraft) === idea.displayHours}
+                  onClick={() => {
+                    const n = parseInt(hoursDraft, 10);
+                    if (!Number.isFinite(n) || n < 1) return;
+                    patch.mutate({ customHours: n });
+                  }}
+                  className="sb-modal-act"
+                  style={{ marginTop: 0 }}
+                >
+                  Save hours
+                </button>
+              </div>
+            </label>
 
             <section>
               <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 8 }}>Source pages</div>

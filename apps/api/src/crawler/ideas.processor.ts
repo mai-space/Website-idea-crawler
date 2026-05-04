@@ -8,6 +8,7 @@ import { EventsGateway } from '../events/events.gateway';
 import { IDEAS_QUEUE, type GenerateIdeasJob } from './ideas.constants';
 import { QueueStatsEmitter } from './queue-stats.emitter';
 import { baseScore, normalizeIdeaKind } from './ideas.scoring';
+import { NotifierService } from '../notifications/notifier.service';
 
 const DEDUP_THRESHOLD = 0.92;
 const MIN_CONFIDENCE = 0.6;
@@ -82,6 +83,7 @@ export class IdeasProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly events: EventsGateway,
     private readonly queueStats: QueueStatsEmitter,
+    private readonly notifier: NotifierService,
   ) {
     super();
   }
@@ -204,7 +206,7 @@ Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with exist
 
       for (const raw of rawIdeas) {
         progress = Math.min(95, progress + step);
-        await this.persistOneIdea(client, orgId, siteId, cms, raw, site.pages);
+        await this.persistOneIdea(client, orgId, siteId, cms, raw, site.pages, site.name);
         this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'running', progress });
       }
 
@@ -235,6 +237,7 @@ Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with exist
     cms: CmsType,
     raw: RawIdea,
     pages: { id: string; url: string; type: PageType }[],
+    siteName: string,
   ) {
     const title = (raw.title || '').trim().slice(0, 512);
     const pitchText = (raw.pitchText || '').trim();
@@ -335,6 +338,13 @@ Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with exist
       ideaId: idea.id,
       siteId,
       title: idea.title,
+    });
+
+    await this.notifier.notifyNewIdea({
+      ideaId: idea.id,
+      siteId,
+      title: idea.title,
+      siteName,
     });
   }
 }

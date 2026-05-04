@@ -1,4 +1,4 @@
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class UpdateSiteDto {
   @IsString()
@@ -14,4 +14,14 @@ export class UpdateSiteDto {
   @Max(10)
   @IsOptional()
   priority?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  scheduleEnabled?: boolean;
+
+  /** Five-field cron, e.g. `0 4 * * *` (daily 04:00 UTC) */
+  @IsString()
+  @IsOptional()
+  @MaxLength(128)
+  scheduleCron?: string | null;
 }

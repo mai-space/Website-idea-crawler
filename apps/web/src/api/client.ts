@@ -30,10 +30,29 @@ export interface Site {
   priority: number;
   status: 'idle' | 'crawling' | 'analyzing' | 'error';
   healthScore: number | null;
+  scheduleEnabled?: boolean;
+  scheduleCron?: string | null;
+  nextCrawlAt?: string | null;
   createdAt: string;
   updatedAt: string;
   _count: { ideas: number; pages: number };
   crawlJobs: CrawlJob[];
+}
+
+export interface CrawlErrorApiRow {
+  at: string;
+  siteId: string;
+  siteName: string;
+  crawlJobId: string;
+  url?: string;
+  error?: string;
+}
+
+export interface IdeaOrgStats {
+  total: number;
+  openHighImpact: number;
+  byStatus: Record<string, number>;
+  byComplexity: Record<string, number>;
 }
 
 export type PageType = 'landing' | 'blog' | 'product' | 'docs' | 'other';

@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import type { PageType } from '@prisma/client';
+import type { JobTrigger, PageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { CRAWL_QUEUE, type CrawlPageJob } from './crawl.constants';
@@ -11,6 +11,10 @@ import { IDEAS_QUEUE } from './ideas.constants';
 export interface StartCrawlDto {
   depth?: number;
   maxPages?: number;
+}
+
+export interface StartCrawlOptions {
+  triggeredBy?: JobTrigger;
 }
 
 @Injectable()
@@ -23,19 +27,20 @@ export class CrawlerService {
     @InjectQueue(IDEAS_QUEUE) private readonly ideasQueue: Queue,
   ) {}
 
-  async startCrawl(orgId: string, siteId: string, dto: StartCrawlDto = {}) {
+  async startCrawl(orgId: string, siteId: string, dto: StartCrawlDto = {}, opts: StartCrawlOptions = {}) {
     const site = await this.prisma.site.findUnique({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Site not found');
     if (site.orgId !== orgId) throw new ForbiddenException();
     if (site.status === 'crawling') throw new BadRequestException('Crawl already running');
 
     const maxDepth = dto.depth ?? parseInt(process.env.CRAWLER_DEFAULT_DEPTH || '3');
+    const triggeredBy = opts.triggeredBy ?? 'manual';
 
     const crawlJob = await this.prisma.crawlJob.create({
       data: {
         siteId,
         status: 'queued',
-        triggeredBy: 'manual',
+        triggeredBy,
         pagesTotal: 1,
         pagesCrawled: 0,
         startedAt: new Date(),
@@ -67,6 +72,16 @@ export class CrawlerService {
     this.events.emitJobUpdate(orgId, { jobId: crawlJob.id, siteId, status: 'running', progress: 0 });
 
     return { jobId: crawlJob.id, status: 'running', estimatedDuration: 120 };
+  }
+
+  /** Used by scheduler; returns false if crawl could not start (e.g. already running). */
+  async startScheduledCrawl(orgId: string, siteId: string): Promise<boolean> {
+    try {
+      await this.startCrawl(orgId, siteId, {}, { triggeredBy: 'scheduled' });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async stopCrawl(orgId: string, siteId: string) {

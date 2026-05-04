@@ -97,17 +97,20 @@ model User {
 }
 
 model Site {
-  id          String     @id @default(uuid()) @db.Uuid
-  orgId       String     @map("org_id") @db.Uuid
-  name        String     @db.VarChar(255)
-  url         String     @db.VarChar(2048)
-  cms         CmsType    @default(generic)
-  priority    Int        @default(5)
-  status      SiteStatus @default(idle)
-  healthScore Float?     @map("health_score")
-  config      Json?
-  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+  id               String     @id @default(uuid()) @db.Uuid
+  orgId            String     @map("org_id") @db.Uuid
+  name             String     @db.VarChar(255)
+  url              String     @db.VarChar(2048)
+  cms              CmsType    @default(generic)
+  priority         Int        @default(5)
+  status           SiteStatus @default(idle)
+  healthScore      Float?     @map("health_score")
+  config           Json?
+  scheduleEnabled  Boolean    @default(false) @map("schedule_enabled")
+  scheduleCron     String?    @map("schedule_cron") @db.VarChar(128)
+  nextCrawlAt      DateTime?  @map("next_crawl_at") @db.Timestamptz
+  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
   organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   crawlJobs    CrawlJob[]

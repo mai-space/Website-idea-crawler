@@ -65,42 +65,71 @@ export class CrawlProcessor extends WorkerHost {
 
     const pageType = classifyPageFromCrawl(url, $);
     const rawHtml = truncateRawHtml(html);
+    const meta = {
+      wordCount: $('body').text().split(/\s+/).filter(Boolean).length,
+      description: $('meta[name="description"]').attr('content') || null,
+    } as object;
 
-    const page = await this.prisma.page.upsert({
+    const existing = await this.prisma.page.findUnique({
       where: { siteId_url: { siteId, url } },
-      create: {
-        siteId,
-        crawlJobId,
-        url,
-        title: title.slice(0, 512),
-        type: pageType,
-        contentHash,
-        rawHtml,
-        parsedAt: null,
-        meta: {
-          wordCount: $('body').text().split(/\s+/).filter(Boolean).length,
-          description: $('meta[name="description"]').attr('content') || null,
-        },
-      },
-      update: {
-        crawlJobId,
-        contentHash,
-        title: title.slice(0, 512),
-        type: pageType,
-        rawHtml,
-        parsedAt: null,
-        meta: {
-          wordCount: $('body').text().split(/\s+/).filter(Boolean).length,
-          description: $('meta[name="description"]').attr('content') || null,
-        },
-      },
     });
 
-    await this.parseQueue.add(
-      'parse:extract',
-      { pageId: page.id, orgId, siteId } satisfies ParsePageJob,
-      { attempts: 2, backoff: { type: 'exponential', delay: 2000 } },
-    );
+    let pageId: string;
+    let needsParse = true;
+
+    if (existing?.contentHash === contentHash && existing.parsedAt) {
+      await this.prisma.page.update({
+        where: { id: existing.id },
+        data: {
+          crawlJobId,
+          title: title.slice(0, 512),
+          type: pageType,
+          meta,
+        },
+      });
+      pageId = existing.id;
+      needsParse = false;
+    } else if (existing) {
+      await this.prisma.$executeRawUnsafe(`UPDATE pages SET embedding = NULL WHERE id = $1::uuid`, existing.id);
+      const updated = await this.prisma.page.update({
+        where: { id: existing.id },
+        data: {
+          crawlJobId,
+          title: title.slice(0, 512),
+          type: pageType,
+          contentHash,
+          rawHtml,
+          parsedAt: null,
+          meta,
+        },
+      });
+      pageId = updated.id;
+      needsParse = true;
+    } else {
+      const created = await this.prisma.page.create({
+        data: {
+          siteId,
+          crawlJobId,
+          url,
+          title: title.slice(0, 512),
+          type: pageType,
+          contentHash,
+          rawHtml,
+          parsedAt: null,
+          meta,
+        },
+      });
+      pageId = created.id;
+      needsParse = true;
+    }
+
+    if (needsParse) {
+      await this.parseQueue.add(
+        'parse:extract',
+        { pageId, orgId, siteId } satisfies ParsePageJob,
+        { attempts: 2, backoff: { type: 'exponential', delay: 2000 } },
+      );
+    }
     void this.queueStats.emitForOrg(orgId);
 
     const updated = await this.prisma.crawlJob.update({
@@ -118,7 +147,9 @@ export class CrawlProcessor extends WorkerHost {
       status: 'running',
       progress,
     });
-    this.events.emitCrawlPage(orgId, { siteId, url, pageType: page.type });
+    if (needsParse) {
+      this.events.emitCrawlPage(orgId, { siteId, url, pageType });
+    }
 
     if (depth < maxDepth && updated.pagesCrawled < this.maxPages) {
       const baseUrl = new URL(url);

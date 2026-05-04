@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Query, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Request, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { IdeasService } from './ideas.service';
 import { ListIdeasQueryDto } from './dto/list-ideas-query.dto';
 import { PatchIdeaDto } from './dto/patch-idea.dto';
+import { BulkIdeasDto } from './dto/bulk-ideas.dto';
 
 interface AuthedRequest {
   user: { userId: string; orgId: string };
@@ -12,6 +13,16 @@ interface AuthedRequest {
 @Controller('ideas')
 export class IdeasController {
   constructor(private readonly ideas: IdeasService) {}
+
+  @Get('stats')
+  stats(@Request() req: AuthedRequest) {
+    return this.ideas.getOrgStats(req.user.orgId);
+  }
+
+  @Post('bulk')
+  bulk(@Request() req: AuthedRequest, @Body() dto: BulkIdeasDto) {
+    return this.ideas.bulkSetStatus(req.user.orgId, dto);
+  }
 
   @Get()
   listOrg(@Request() req: AuthedRequest, @Query() q: ListIdeasQueryDto) {

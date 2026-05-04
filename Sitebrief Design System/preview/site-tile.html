@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Site tile</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .tile { background:var(--paper-2); border:1px solid var(--rule); border-radius:12px; padding:18px; display:flex; flex-direction:column; gap:14px; }
+  .head { display:flex; align-items:center; justify-content:space-between; }
+  .name { font-family:var(--font-display); font-weight:500; font-size:20px; letter-spacing:-0.01em; }
+  .url  { font-family:var(--font-mono); font-size:12px; color:var(--ink-3); }
+  .status { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-family:var(--font-ui); color:var(--ink-2); padding:4px 10px; border-radius:999px; background:#E2F0E5; color:#1F5C36; }
+  .dot { width:6px; height:6px; border-radius:50%; background:#3F8A57; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.4 } }
+  .stats { display:grid; grid-template-columns: repeat(4,1fr); gap:14px; }
+  .stat .k { font-family:var(--font-ui); font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.04em; }
+  .stat .v { font-family:var(--font-display); font-weight:500; font-size:22px; color:var(--ink); margin-top:2px; }
+  .stat .vs { font-family:var(--font-mono); font-size:11px; color:var(--ink-2); }
+  .progress { height:4px; background:var(--paper-0); border-radius:2px; overflow:hidden; }
+  .progress > i { display:block; height:100%; background:#E2632A; width:62%; }
+  .foot { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:11px; color:var(--ink-3); }
+</style>
+<div class="card" style="padding:0;background:var(--paper)">
+  <div style="padding:24px">
+    <div class="tile">
+      <div class="head">
+        <div>
+          <div class="name">acme.example.com</div>
+          <div class="url">TYPO3 · priority 7</div>
+        </div>
+        <div class="status"><span class="dot"></span>crawling</div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="k">Pages</div><div class="v">1,240</div></div>
+        <div class="stat"><div class="k">Open briefs</div><div class="v">28</div></div>
+        <div class="stat"><div class="k">Health</div><div class="v">0.84</div></div>
+        <div class="stat"><div class="k">Last sync</div><div class="vs" style="margin-top:6px">14 min ago</div></div>
+      </div>
+      <div class="progress"><i></i></div>
+      <div class="foot"><span>768 / 1,240 pages parsed</span><span>62%</span></div>
+    </div>
+  </div>
+</div>

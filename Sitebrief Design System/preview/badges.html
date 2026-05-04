@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Badges</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .grp  { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .lbl  { font-family:var(--font-ui); font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.04em; min-width:90px; }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:4px; font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; font-family:var(--font-ui); }
+  .dot   { width:6px; height:6px; border-radius:50%; }
+  .area  { background:var(--paper-0); color:var(--ink-2); border:1px solid var(--rule); padding:3px 8px; border-radius:4px; font-size:11px; font-weight:500; letter-spacing:0.04em; text-transform:uppercase; font-family:var(--font-ui); }
+  .status { display:inline-flex; align-items:center; gap:6px; font-size:13px; font-family:var(--font-ui); color:var(--ink); }
+</style>
+<div class="card">
+  <div class="grp"><div class="lbl">Complexity</div>
+    <span class="badge" style="background:#E2F0E5;color:#1F5C36">low · 4h</span>
+    <span class="badge" style="background:#F5EAD0;color:#6E5118">medium · 16h</span>
+    <span class="badge" style="background:#F2DCDC;color:#7A2828">high · 60h</span>
+  </div>
+  <div class="grp"><div class="lbl">Areas</div>
+    <span class="area">content</span>
+    <span class="area">seo</span>
+    <span class="area">feature</span>
+    <span class="area">ux</span>
+  </div>
+  <div class="grp" style="gap:18px"><div class="lbl">Status</div>
+    <span class="status"><span class="dot" style="background:#5B6068"></span>open</span>
+    <span class="status"><span class="dot" style="background:#3F8A57"></span>accepted</span>
+    <span class="status"><span class="dot" style="background:#B8862A"></span>deferred</span>
+    <span class="status"><span class="dot" style="background:#9099A2"></span>rejected</span>
+    <span class="status"><span class="dot" style="background:#A23E10"></span>done</span>
+  </div>
+</div>

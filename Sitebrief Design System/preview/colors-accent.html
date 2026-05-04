@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Accent</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .swatch { flex:1; border-radius:8px; padding:16px; display:flex; flex-direction:column; gap:24px; min-height:120px; border:1px solid var(--rule); }
+  .swatch .name { font-size:13px; font-weight:600; }
+  .swatch .hex  { font-family: var(--font-mono); font-size:11px; opacity:0.75; }
+  .demo { display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--paper-2); border:1px solid var(--rule); border-radius:8px; font-size:13px; }
+  .pill { padding:4px 10px; border-radius:6px; font-size:12px; font-weight:600; }
+</style>
+<div class="card">
+  <div class="row">
+    <div class="swatch" style="background:#E2632A; color:#FFFFFF">
+      <div class="name">accent</div>
+      <div><div class="hex">#E2632A</div><div class="tok" style="color:inherit;opacity:0.7">--accent</div></div>
+    </div>
+    <div class="swatch" style="background:#A23E10; color:#FFFFFF">
+      <div class="name">accent-ink</div>
+      <div><div class="hex">#A23E10</div><div class="tok" style="color:inherit;opacity:0.7">--accent-ink</div></div>
+    </div>
+    <div class="swatch" style="background:#FBE9DC; color:#15171A">
+      <div class="name">accent-bg</div>
+      <div><div class="hex">#FBE9DC</div><div class="tok" style="color:inherit;opacity:0.7">--accent-bg</div></div>
+    </div>
+  </div>
+  <div class="row" style="gap:12px;align-items:center">
+    <div class="demo">
+      <span class="pill" style="background:#E2632A;color:#fff">Run crawl</span>
+      <span style="color:var(--ink-2)">primary action</span>
+    </div>
+    <div class="demo">
+      <a href="#" style="color:#A23E10">→ Open brief</a>
+    </div>
+  </div>
+</div>

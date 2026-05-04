@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  free
+  pro
+  enterprise
+}
+
+enum CmsType {
+  typo3
+  wordpress
+  generic
+}
+
+enum SiteStatus {
+  idle
+  crawling
+  analyzing
+  error
+}
+
+enum JobStatus {
+  queued
+  running
+  done
+  failed
+  stopped
+}
+
+enum JobTrigger {
+  manual
+  scheduled
+  api
+}
+
+enum PageType {
+  landing
+  blog
+  product
+  docs
+  other
+}
+
+enum IdeaComplexity {
+  low
+  medium
+  high
+}
+
+enum IdeaStatus {
+  open
+  accepted
+  rejected
+  deferred
+  done
+}
+
+enum UserRole {
+  admin
+  editor
+  viewer
+}
+
+model Organization {
+  id                  String   @id @default(uuid()) @db.Uuid
+  name                String   @db.VarChar(255)
+  plan                Plan     @default(free)
+  maxSites            Int      @default(3) @map("max_sites")
+  maxConcurrentCrawls Int      @default(2) @map("max_concurrent_crawls")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  users User[]
+  sites Site[]
+
+  @@map("organizations")
+}
+
+model User {
+  id           String       @id @default(uuid()) @db.Uuid
+  orgId        String       @map("org_id") @db.Uuid
+  email        String       @unique @db.VarChar(255)
+  passwordHash String       @map("password_hash")
+  name         String       @db.VarChar(255)
+  role         UserRole     @default(editor)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("users")
+}
+
+model Site {
+  id          String     @id @default(uuid()) @db.Uuid
+  orgId       String     @map("org_id") @db.Uuid
+  name        String     @db.VarChar(255)
+  url         String     @db.VarChar(2048)
+  cms         CmsType    @default(generic)
+  priority    Int        @default(5)
+  status      SiteStatus @default(idle)
+  healthScore Float?     @map("health_score")
+  config      Json?
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  crawlJobs    CrawlJob[]
+  pages        Page[]
+  ideas        Idea[]
+
+  @@map("sites")
+}
+
+model CrawlJob {
+  id           String     @id @default(uuid()) @db.Uuid
+  siteId       String     @map("site_id") @db.Uuid
+  status       JobStatus  @default(queued)
+  triggeredBy  JobTrigger @default(manual) @map("triggered_by")
+  pagesTotal   Int        @default(0) @map("pages_total")
+  pagesCrawled Int        @default(0) @map("pages_crawled")
+  startedAt    DateTime?  @map("started_at") @db.Timestamptz
+  finishedAt   DateTime?  @map("finished_at") @db.Timestamptz
+  errors       Json[]     @default([])
+
+  site  Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  pages Page[]
+
+  @@index([siteId, status])
+  @@map("crawl_jobs")
+}
+
+model Page {
+  id          String    @id @default(uuid()) @db.Uuid
+  siteId      String    @map("site_id") @db.Uuid
+  crawlJobId  String    @map("crawl_job_id") @db.Uuid
+  url         String    @db.VarChar(2048)
+  type        PageType  @default(other)
+  title       String?   @db.VarChar(512)
+  contentHash String?   @map("content_hash") @db.VarChar(64)
+  parsedAt    DateTime? @map("parsed_at") @db.Timestamptz
+  meta        Json?
+
+  site        Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  crawlJob    CrawlJob   @relation(fields: [crawlJobId], references: [id])
+  ideaSources IdeaSource[]
+
+  @@index([siteId, type])
+  @@map("pages")
+}
+
+model Idea {
+  id             String         @id @default(uuid()) @db.Uuid
+  siteId         String         @map("site_id") @db.Uuid
+  title          String         @db.VarChar(512)
+  pitchText      String         @map("pitch_text")
+  description    String?
+  complexity     IdeaComplexity @default(medium)
+  estimatedHours Int            @default(0) @map("estimated_hours")
+  requiresDev    Boolean        @default(false) @map("requires_dev")
+  areas          String[]
+  confidence     Float          @default(0.8)
+  impactScore    Float          @default(0.5) @map("impact_score")
+  status         IdeaStatus     @default(open)
+  customHours    Int?           @map("custom_hours")
+  rejectedReason String?        @map("rejected_reason")
+  notes          String?
+  generatedAt    DateTime       @default(now()) @map("generated_at") @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  updatedBy      String?        @map("updated_by") @db.Uuid
+
+  site        Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  ideaSources IdeaSource[]
+
+  @@index([siteId, status, complexity])
+  @@map("ideas")
+}
+
+model IdeaSource {
+  ideaId String @map("idea_id") @db.Uuid
+  pageId String @map("page_id") @db.Uuid
+
+  idea Idea @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@id([ideaId, pageId])
+  @@map("idea_sources")
+}

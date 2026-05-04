@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Form fields</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .field { display:flex; flex-direction:column; gap:6px; flex:1; }
+  .lbl   { font-family:var(--font-ui); font-size:12px; font-weight:500; color:var(--ink-2); }
+  .input { font-family:var(--font-ui); font-size:14px; padding:10px 12px; background:var(--paper-2); border:1px solid var(--rule); border-radius:8px; color:var(--ink); width:100%; box-sizing:border-box; }
+  .input:focus { outline:2px solid #E2632A; outline-offset:1px; border-color:transparent; }
+  .hint  { font-family:var(--font-ui); font-size:12px; color:var(--ink-3); }
+  .row2  { display:flex; gap:12px; }
+  .check { display:flex; align-items:center; gap:8px; font-family:var(--font-ui); font-size:13px; color:var(--ink); }
+  .check input { width:16px; height:16px; accent-color:#E2632A; }
+</style>
+<div class="card">
+  <div class="row2">
+    <div class="field">
+      <div class="lbl">Site URL</div>
+      <input class="input" value="https://acme.example.com">
+      <div class="hint">Sitemap detected automatically.</div>
+    </div>
+    <div class="field" style="max-width:160px">
+      <div class="lbl">Priority</div>
+      <input class="input" value="5">
+    </div>
+  </div>
+  <div class="row2" style="gap:24px;align-items:center">
+    <label class="check"><input type="checkbox" checked> Respect robots.txt</label>
+    <label class="check"><input type="checkbox"> Use Puppeteer for JS sites</label>
+  </div>
+</div>

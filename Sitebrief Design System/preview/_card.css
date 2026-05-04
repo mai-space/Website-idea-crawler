@@ -1,0 +1,44 @@
+/* Shared shell for design-system specimen cards.
+ * Each card targets ~700×<height>, sits on paper, no titles.
+ */
+@import url("../colors_and_type.css");
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  width: 700px;
+  box-sizing: border-box;
+  padding: 24px;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.row { display: flex; gap: 12px; align-items: stretch; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-family: var(--font-ui);
+}
+.tok {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.label {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--ink-2);
+}

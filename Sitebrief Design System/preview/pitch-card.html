@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Pitch card</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .pitch { background:var(--paper-2); border:1px solid var(--rule); border-radius:12px; padding:20px; box-shadow: 0 1px 2px rgba(21,23,26,0.04); display:flex; flex-direction:column; gap:14px; }
+  .eyebrow-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .eyebrow-l { display:flex; align-items:center; gap:6px; }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:4px; font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; font-family:var(--font-ui); }
+  .area  { background:var(--paper-0); color:var(--ink-2); border:1px solid var(--rule); padding:3px 8px; border-radius:4px; font-size:11px; font-weight:500; letter-spacing:0.04em; text-transform:uppercase; }
+  .hours { font-family: var(--font-mono); font-size:13px; color:var(--ink-2); }
+  .title { font-family: var(--font-display); font-weight:500; font-size:24px; line-height:1.2; letter-spacing:-0.015em; }
+  .pitch-text { font-size:15px; line-height:1.55; color:var(--ink); }
+  .cms-hint { background:#FBE9DC; border-radius:8px; padding:10px 14px; font-size:13px; color:#7A2C0E; display:flex; gap:10px; }
+  .footer { display:flex; align-items:center; justify-content:space-between; padding-top:14px; border-top:1px solid var(--rule); }
+  .actions { display:flex; gap:8px; }
+  .btn { font-family:var(--font-ui); font-size:13px; font-weight:500; padding:7px 12px; border-radius:6px; border:1px solid var(--rule); background:var(--paper-2); cursor:pointer; }
+  .btn-primary { background:#E2632A; color:#fff; border-color:transparent; }
+  .impact { display:flex; align-items:center; gap:8px; font-family:var(--font-ui); font-size:12px; color:var(--ink-2); }
+  .bar { width:80px; height:4px; background:var(--paper-0); border-radius:2px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:var(--ink); width:76%; }
+</style>
+<div class="card" style="padding:0;width:700px;background:var(--paper)">
+  <div style="padding:24px">
+    <div class="pitch">
+      <div class="eyebrow-row">
+        <div class="eyebrow-l">
+          <span class="badge" style="background:#F5EAD0;color:#6E5118">medium</span>
+          <span class="area">content</span>
+          <span class="area">seo</span>
+        </div>
+        <div class="hours">16h</div>
+      </div>
+      <div class="title">Blogserie zu Feature X einführen</div>
+      <div class="pitch-text">The site has strong product-page traffic but no supporting content. A short blog series on Feature X could lift organic reach and conversion without adding dev work.</div>
+      <div class="cms-hint"><span style="font-weight:600">TYPO3</span><span>Implementable via EXT:news — no custom development required.</span></div>
+      <div class="footer">
+        <div class="actions">
+          <button class="btn btn-primary">Accept</button>
+          <button class="btn">Defer</button>
+          <button class="btn">Reject</button>
+        </div>
+        <div class="impact">Impact <div class="bar"><i></i></div></div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Complexity</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .row2 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; }
+  .swatch { border-radius:8px; padding:14px; min-height:84px; display:flex; flex-direction:column; justify-content:space-between; }
+  .name { font-size:13px; font-weight:600; }
+  .hex  { font-family: var(--font-mono); font-size:11px; opacity:0.75; }
+  .badge { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:11px; font-weight:600; letter-spacing:0.04em; text-transform:uppercase; align-self:flex-start; }
+  .dot { width:6px; height:6px; border-radius:50%; }
+</style>
+<div class="card">
+  <div class="row2">
+    <div class="swatch" style="background:#E2F0E5;color:#1F5C36">
+      <span class="badge" style="background:#3F8A57;color:#fff"><span class="dot" style="background:#fff"></span>low</span>
+      <div><div class="name">low complexity</div><div class="hex">#3F8A57 · bg #E2F0E5</div></div>
+    </div>
+    <div class="swatch" style="background:#F5EAD0;color:#6E5118">
+      <span class="badge" style="background:#B8862A;color:#fff"><span class="dot" style="background:#fff"></span>medium</span>
+      <div><div class="name">medium complexity</div><div class="hex">#B8862A · bg #F5EAD0</div></div>
+    </div>
+    <div class="swatch" style="background:#F2DCDC;color:#7A2828">
+      <span class="badge" style="background:#B23F3F;color:#fff"><span class="dot" style="background:#fff"></span>high</span>
+      <div><div class="name">high complexity</div><div class="hex">#B23F3F · bg #F2DCDC</div></div>
+    </div>
+  </div>
+  <div style="font-size:12px;color:var(--ink-3);font-family:var(--font-ui)">Complexity is the only color-coded signal in the brief. Status uses ink, not color.</div>
+</div>

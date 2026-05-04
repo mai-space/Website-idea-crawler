@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Radii</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .row2 { display:flex; gap:16px; }
+  .box  { flex:1; aspect-ratio:1.6/1; background:var(--paper-2); border:1px solid var(--rule); display:flex; flex-direction:column; justify-content:flex-end; padding:10px; }
+  .num  { font-family:var(--font-mono); font-size:11px; color:var(--ink-2); }
+  .name { font-family:var(--font-ui); font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:0.04em; }
+</style>
+<div class="card">
+  <div class="row2">
+    <div class="box" style="border-radius:4px"><div class="name">r-sm</div><div class="num">4px · pills, badges</div></div>
+    <div class="box" style="border-radius:8px"><div class="name">r-md</div><div class="num">8px · buttons, inputs</div></div>
+    <div class="box" style="border-radius:12px"><div class="name">r-lg</div><div class="num">12px · cards</div></div>
+    <div class="box" style="border-radius:20px"><div class="name">r-xl</div><div class="num">20px · modal sheets</div></div>
+  </div>
+  <div style="font-size:12px;color:var(--ink-3);font-family:var(--font-ui)">No fully-rounded surfaces — only avatars and status dots use border-radius:50%.</div>
+</div>

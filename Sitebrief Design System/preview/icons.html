@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Iconography</title>
+<link rel="stylesheet" href="_card.css">
+<style>
+  .grid { display:grid; grid-template-columns: repeat(8, 1fr); gap:14px; }
+  .ic { display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px; border:1px solid var(--rule); border-radius:8px; background:var(--paper-2); }
+  .ic svg { width:20px; height:20px; stroke:var(--ink); }
+  .ic .l { font-family:var(--font-mono); font-size:10px; color:var(--ink-3); }
+  .sizes { display:flex; gap:14px; align-items:flex-end; padding-top:8px; }
+  .sz { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .sz .l { font-family:var(--font-mono); font-size:10px; color:var(--ink-3); }
+</style>
+<div class="card">
+  <div class="grid">
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><span class="l">globe</span></div>
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="l">brief</span></div>
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span class="l">activity</span></div>
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg><span class="l">trash</span></div>
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="l">search</span></div>
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span class="l">crawl</span></div>
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="l">settings</span></div>
+    <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span class="l">export</span></div>
+  </div>
+  <div class="sizes">
+    <div class="sz"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#15171A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="l">14</span></div>
+    <div class="sz"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#15171A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="l">16</span></div>
+    <div class="sz"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#15171A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="l">20</span></div>
+    <div class="sz"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#15171A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><span class="l">24</span></div>
+    <div style="font-family:var(--font-ui);font-size:12px;color:var(--ink-3);align-self:center;margin-left:14px">Lucide · 1.5px stroke · currentColor</div>
+  </div>
+</div>

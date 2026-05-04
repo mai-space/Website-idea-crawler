@@ -7,18 +7,11 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { RateLimiterService } from './rate-limiter.service';
-
-export const CRAWL_QUEUE = 'crawl-queue';
-
-export interface CrawlPageJob {
-  siteId: string;
-  crawlJobId: string;
-  orgId: string;
-  url: string;
-  depth: number;
-  maxDepth: number;
-  visitedUrls: string[];
-}
+import { CRAWL_QUEUE, type CrawlPageJob } from './crawl.constants';
+import { PARSE_QUEUE, type ParsePageJob } from './parse.constants';
+import { classifyPageFromCrawl } from './page-classifier';
+import { truncateRawHtml } from './html-parse';
+import { QueueStatsEmitter } from './queue-stats.emitter';
 
 @Processor(CRAWL_QUEUE, { concurrency: 3 })
 export class CrawlProcessor extends WorkerHost {
@@ -30,7 +23,9 @@ export class CrawlProcessor extends WorkerHost {
     private readonly prisma: PrismaService,
     private readonly events: EventsGateway,
     private readonly rateLimiter: RateLimiterService,
+    private readonly queueStats: QueueStatsEmitter,
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue,
+    @InjectQueue(PARSE_QUEUE) private readonly parseQueue: Queue,
   ) {
     super();
   }
@@ -68,26 +63,45 @@ export class CrawlProcessor extends WorkerHost {
     const title = $('title').text().trim() || $('h1').first().text().trim() || url;
     const contentHash = crypto.createHash('sha256').update(html).digest('hex').slice(0, 64);
 
-    const pageType = this.classifyPage(url, $);
+    const pageType = classifyPageFromCrawl(url, $);
+    const rawHtml = truncateRawHtml(html);
 
-    await this.prisma.page.upsert({
-      where: { id: `${crawlJobId}-${Buffer.from(url).toString('base64').slice(0, 32)}` },
+    const page = await this.prisma.page.upsert({
+      where: { siteId_url: { siteId, url } },
       create: {
-        id: `${crawlJobId}-${Buffer.from(url).toString('base64').slice(0, 32)}`,
         siteId,
         crawlJobId,
         url,
         title: title.slice(0, 512),
         type: pageType,
         contentHash,
-        parsedAt: new Date(),
+        rawHtml,
+        parsedAt: null,
         meta: {
-          wordCount: $('body').text().split(/\s+/).length,
+          wordCount: $('body').text().split(/\s+/).filter(Boolean).length,
           description: $('meta[name="description"]').attr('content') || null,
         },
       },
-      update: { contentHash, title: title.slice(0, 512), parsedAt: new Date() },
+      update: {
+        crawlJobId,
+        contentHash,
+        title: title.slice(0, 512),
+        type: pageType,
+        rawHtml,
+        parsedAt: null,
+        meta: {
+          wordCount: $('body').text().split(/\s+/).filter(Boolean).length,
+          description: $('meta[name="description"]').attr('content') || null,
+        },
+      },
     });
+
+    await this.parseQueue.add(
+      'parse:extract',
+      { pageId: page.id, orgId, siteId } satisfies ParsePageJob,
+      { attempts: 2, backoff: { type: 'exponential', delay: 2000 } },
+    );
+    void this.queueStats.emitForOrg(orgId);
 
     const updated = await this.prisma.crawlJob.update({
       where: { id: crawlJobId },
@@ -104,7 +118,7 @@ export class CrawlProcessor extends WorkerHost {
       status: 'running',
       progress,
     });
-    this.events.emitCrawlPage(orgId, { siteId, url, pageType });
+    this.events.emitCrawlPage(orgId, { siteId, url, pageType: page.type });
 
     if (depth < maxDepth && updated.pagesCrawled < this.maxPages) {
       const baseUrl = new URL(url);
@@ -153,19 +167,5 @@ export class CrawlProcessor extends WorkerHost {
       await this.prisma.site.update({ where: { id: siteId }, data: { status: 'idle' } });
       this.events.emitJobUpdate(orgId, { jobId: crawlJobId, siteId, status: 'done', progress: 100 });
     }
-  }
-
-  private classifyPage(url: string, $: cheerio.CheerioAPI): 'landing' | 'blog' | 'product' | 'docs' | 'other' {
-    const path = new URL(url).pathname.toLowerCase();
-    if (path === '/' || path === '') return 'landing';
-    if (/\/(blog|news|artikel|beitrag)/.test(path)) return 'blog';
-    if (/\/(produkt|product|shop|leistung|service)/.test(path)) return 'product';
-    if (/\/(docs|documentation|hilfe|help|wiki)/.test(path)) return 'docs';
-
-    const h1 = $('h1').first().text().toLowerCase();
-    if (/blog|news/.test(h1)) return 'blog';
-    if (/produkt|product|shop/.test(h1)) return 'product';
-
-    return 'other';
   }
 }

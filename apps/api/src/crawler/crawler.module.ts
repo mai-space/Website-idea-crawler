@@ -2,9 +2,13 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { CrawlerService } from './crawler.service';
 import { CrawlerController } from './crawler.controller';
-import { CrawlProcessor, CRAWL_QUEUE } from './crawl.processor';
+import { CrawlProcessor } from './crawl.processor';
+import { ParseProcessor } from './parse.processor';
 import { RateLimiterService } from './rate-limiter.service';
+import { QueueStatsEmitter } from './queue-stats.emitter';
 import { EventsModule } from '../events/events.module';
+import { CRAWL_QUEUE } from './crawl.constants';
+import { PARSE_QUEUE } from './parse.constants';
 
 @Module({
   imports: [
@@ -16,10 +20,10 @@ import { EventsModule } from '../events/events.module';
         },
       }),
     }),
-    BullModule.registerQueue({ name: CRAWL_QUEUE }),
+    BullModule.registerQueue({ name: CRAWL_QUEUE }, { name: PARSE_QUEUE }),
     EventsModule,
   ],
-  providers: [CrawlerService, CrawlProcessor, RateLimiterService],
+  providers: [CrawlerService, CrawlProcessor, ParseProcessor, RateLimiterService, QueueStatsEmitter],
   controllers: [CrawlerController],
   exports: [CrawlerService],
 })

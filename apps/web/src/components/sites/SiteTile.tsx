@@ -4,6 +4,7 @@ import type { Site } from '@/api/client';
 
 interface Props {
   site: Site;
+  onOpenDetail?: (siteId: string) => void;
 }
 
 const STATUS_DOT: Record<Site['status'], { bg: string; dot: string; label: string }> = {
@@ -13,7 +14,7 @@ const STATUS_DOT: Record<Site['status'], { bg: string; dot: string; label: strin
   error:     { bg: 'var(--high-bg)', dot: 'var(--high)',   label: 'error' },
 };
 
-export function SiteTile({ site }: Props) {
+export function SiteTile({ site, onOpenDetail }: Props) {
   const qc = useQueryClient();
   const status = STATUS_DOT[site.status];
 
@@ -33,10 +34,21 @@ export function SiteTile({ site }: Props) {
   });
 
   return (
-    <div style={{
+    <div
+      role={onOpenDetail ? 'button' : undefined}
+      tabIndex={onOpenDetail ? 0 : undefined}
+      onKeyDown={onOpenDetail ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpenDetail(site.id);
+        }
+      } : undefined}
+      onClick={() => onOpenDetail?.(site.id)}
+      style={{
       background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 'var(--r-lg)',
       padding: 18, display: 'flex', flexDirection: 'column', gap: 14, boxShadow: 'var(--shadow-1)',
       transition: 'box-shadow var(--dur-base) var(--ease-out)',
+      cursor: onOpenDetail ? 'pointer' : 'default',
     }}
       onMouseEnter={(e) => (e.currentTarget.style.boxShadow = '0 4px 12px rgba(21,23,26,0.08), 0 1px 0 rgba(21,23,26,0.02)')}
       onMouseLeave={(e) => (e.currentTarget.style.boxShadow = 'var(--shadow-1)')}
@@ -75,7 +87,7 @@ export function SiteTile({ site }: Props) {
       <div style={{ display: 'flex', gap: 8, paddingTop: 4 }}>
         {site.status !== 'crawling' ? (
           <button
-            onClick={() => startCrawl.mutate()}
+            onClick={(e) => { e.stopPropagation(); startCrawl.mutate(); }}
             disabled={startCrawl.isPending}
             style={btnStyle('var(--accent)', '#fff')}
           >
@@ -83,7 +95,7 @@ export function SiteTile({ site }: Props) {
           </button>
         ) : (
           <button
-            onClick={() => stopCrawl.mutate()}
+            onClick={(e) => { e.stopPropagation(); stopCrawl.mutate(); }}
             disabled={stopCrawl.isPending}
             style={btnStyle('var(--paper-2)', 'var(--ink)')}
           >
@@ -94,6 +106,7 @@ export function SiteTile({ site }: Props) {
           href={site.url}
           target="_blank"
           rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
           style={{ ...btnStyle('var(--paper-0)', 'var(--ink-2)'), textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
         >
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

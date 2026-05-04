@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import type { PageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
-import { CRAWL_QUEUE, CrawlPageJob } from './crawl.processor';
+import { CRAWL_QUEUE, type CrawlPageJob } from './crawl.constants';
+import { PARSE_QUEUE } from './parse.constants';
 
 export interface StartCrawlDto {
   depth?: number;
@@ -16,6 +18,7 @@ export class CrawlerService {
     private readonly prisma: PrismaService,
     private readonly events: EventsGateway,
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue,
+    @InjectQueue(PARSE_QUEUE) private readonly parseQueue: Queue,
   ) {}
 
   async startCrawl(orgId: string, siteId: string, dto: StartCrawlDto = {}) {
@@ -104,25 +107,36 @@ export class CrawlerService {
 
     const [crawlCount, parseCount, ideasCount] = await Promise.all([
       this.crawlQueue.getWaitingCount(),
-      Promise.resolve(0),
+      this.parseQueue.getWaitingCount(),
       Promise.resolve(0),
     ]);
 
     return {
       siteStatus: site.status,
       activeJob,
-      queueStats: { crawl: crawlCount, parse: parseCount, ideas: ideasCount, workers: 3 },
+      queueStats: { crawl: crawlCount, parse: parseCount, ideas: ideasCount, workers: 8 },
     };
   }
 
-  async getPages(orgId: string, siteId: string) {
+  async getPages(orgId: string, siteId: string, type?: PageType) {
     const site = await this.prisma.site.findUnique({ where: { id: siteId } });
     if (!site) throw new NotFoundException('Site not found');
     if (site.orgId !== orgId) throw new ForbiddenException();
 
     return this.prisma.page.findMany({
-      where: { siteId },
-      orderBy: { parsedAt: 'desc' },
+      where: { siteId, ...(type ? { type } : {}) },
+      orderBy: [{ parsedAt: 'desc' }, { url: 'asc' }],
+      select: {
+        id: true,
+        siteId: true,
+        crawlJobId: true,
+        url: true,
+        type: true,
+        title: true,
+        contentHash: true,
+        parsedAt: true,
+        meta: true,
+      },
     });
   }
 }

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
 import type { Site } from '@/api/client';
 import { SiteTile } from './SiteTile';
+import { SiteDetailDrawer } from './SiteDetailDrawer';
 
 function SkeletonTile() {
   const shimmer: React.CSSProperties = {
@@ -75,6 +76,7 @@ function ModalField({ label, value, onChange, placeholder, type = 'text' }: { la
 
 export function SiteFleet() {
   const [showAdd, setShowAdd] = useState(false);
+  const [detailSiteId, setDetailSiteId] = useState<string | null>(null);
 
   const { data: sites, isLoading } = useQuery<Site[]>({
     queryKey: ['sites'],
@@ -115,11 +117,14 @@ export function SiteFleet() {
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-          {sites.map((site) => <SiteTile key={site.id} site={site} />)}
+          {sites.map((site) => (
+            <SiteTile key={site.id} site={site} onOpenDetail={setDetailSiteId} />
+          ))}
         </div>
       )}
 
       {showAdd && <AddSiteModal onClose={() => setShowAdd(false)} />}
+      <SiteDetailDrawer siteId={detailSiteId} onClose={() => setDetailSiteId(null)} />
     </section>
   );
 }

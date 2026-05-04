@@ -36,6 +36,8 @@ export interface Site {
   crawlJobs: CrawlJob[];
 }
 
+export type PageType = 'landing' | 'blog' | 'product' | 'docs' | 'other';
+
 export interface CrawlJob {
   id: string;
   siteId: string;
@@ -44,6 +46,19 @@ export interface CrawlJob {
   pagesCrawled: number;
   startedAt: string | null;
   finishedAt: string | null;
+  errors?: unknown[];
+}
+
+export interface PageRow {
+  id: string;
+  siteId: string;
+  crawlJobId: string;
+  url: string;
+  type: PageType;
+  title: string | null;
+  contentHash: string | null;
+  parsedAt: string | null;
+  meta: Record<string, unknown> | null;
 }
 
 export interface AuthUser {

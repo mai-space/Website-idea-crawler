@@ -19,9 +19,9 @@ export function DashboardPage() {
               <QueueMonitor />
 
               <div style={{ background: 'var(--paper-2)', border: '1px solid var(--rule)', borderRadius: 'var(--r-lg)', padding: 20, boxShadow: 'var(--shadow-1)' }}>
-                <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 12 }}>Phase 1</div>
+                <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ink-3)', marginBottom: 12 }}>Phase 2</div>
                 <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.6 }}>
-                  Multi-site crawling is live. Parsing pipeline and idea generation come in Phase 2 and 3.
+                  Parse queue, embeddings, and the site detail drawer are live. Idea generation follows in Phase 3.
                 </p>
               </div>
             </aside>

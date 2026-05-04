@@ -6,7 +6,7 @@ import { useAuthStore, useSocketStore } from '@/store';
 export function useSocket() {
   const socketRef = useRef<Socket | null>(null);
   const { user } = useAuthStore();
-  const { setConnected, setQueueStats } = useSocketStore();
+  const { setConnected, setQueueStats, setSocket, pushCrawlPageActivity } = useSocketStore();
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -18,8 +18,14 @@ export function useSocket() {
     });
     socketRef.current = socket;
 
-    socket.on('connect', () => setConnected(true));
-    socket.on('disconnect', () => setConnected(false));
+    socket.on('connect', () => {
+      setConnected(true);
+      setSocket(socket);
+    });
+    socket.on('disconnect', () => {
+      setConnected(false);
+      setSocket(null);
+    });
 
     socket.on('queue.stats', setQueueStats);
 
@@ -28,15 +34,21 @@ export function useSocket() {
       queryClient.invalidateQueries({ queryKey: ['site', siteId] });
     });
 
-    socket.on('crawl.page', ({ siteId }: { siteId: string }) => {
-      queryClient.invalidateQueries({ queryKey: ['site', siteId, 'pages'] });
+    socket.on('crawl.page', (payload: { siteId: string; url: string; pageType: string }) => {
+      pushCrawlPageActivity({
+        siteId: payload.siteId,
+        url: payload.url,
+        pageType: payload.pageType,
+      });
+      queryClient.invalidateQueries({ queryKey: ['site', payload.siteId, 'pages'] });
     });
 
     return () => {
       socket.disconnect();
       setConnected(false);
+      setSocket(null);
     };
-  }, [user?.orgId, setConnected, setQueueStats, queryClient]);
+  }, [user?.orgId, setConnected, setQueueStats, setSocket, pushCrawlPageActivity, queryClient]);
 
   return socketRef;
 }

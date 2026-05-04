@@ -1,6 +1,20 @@
-import { Body, Controller, Delete, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
+import type { PageType } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CrawlerService, StartCrawlDto } from './crawler.service';
+
+const PAGE_TYPES: PageType[] = ['landing', 'blog', 'product', 'docs', 'other'];
 
 interface AuthedRequest {
   user: { userId: string; orgId: string };
@@ -31,7 +45,14 @@ export class CrawlerController {
   }
 
   @Get('pages')
-  getPages(@Request() req: AuthedRequest, @Param('siteId') siteId: string) {
-    return this.crawler.getPages(req.user.orgId, siteId);
+  getPages(
+    @Request() req: AuthedRequest,
+    @Param('siteId') siteId: string,
+    @Query('type') type?: string,
+  ) {
+    if (type && !PAGE_TYPES.includes(type as PageType)) {
+      throw new BadRequestException('Invalid type filter');
+    }
+    return this.crawler.getPages(req.user.orgId, siteId, type as PageType | undefined);
   }
 }

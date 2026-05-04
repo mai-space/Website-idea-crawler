@@ -1,7 +1,7 @@
 # Sitebrief — Agent Handover
 
 > Last updated: 2026-05-04  
-> Completed through: **Phase 1 — Multi-Site Foundation**
+> Completed through: **Phase 2 — Parse & Embed Pipeline**
 
 ---
 
@@ -21,23 +21,24 @@ Design system: `Sitebrief Design System/` — read `Sitebrief Design System/READ
 ├── apps/
 │   ├── api/                  NestJS backend (Node 20, TypeScript)
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma All 6 DB tables + enums
+│   │   │   ├── schema.prisma All tables + enums + pgvector columns on Page/Idea
+│   │   │   ├── migrations/   SQL: vector extension, HNSW indexes, unique(site_id,url)
 │   │   │   └── seed.ts       Demo org + admin user + 2 sites
 │   │   └── src/
 │   │       ├── auth/         JWT login/register/me
 │   │       ├── sites/        Sites CRUD (org-scoped)
-│   │       ├── crawler/      BullMQ crawl-queue, processor, rate-limiter
+│   │       ├── crawler/      BullMQ crawl-queue + parse-queue, processors, rate-limiter
 │   │       ├── events/       Socket.io WebSocket gateway
 │   │       └── prisma/       Global PrismaService
 │   └── web/                  React 18 + Vite + TypeScript frontend
 │       └── src/
 │           ├── api/client.ts Axios instance + shared types
-│           ├── store/        Zustand: auth + socket state
+│           ├── store/        Zustand: auth + socket + crawl activity buffer
 │           ├── hooks/        useAuth, useSocket
 │           ├── pages/        LoginPage, DashboardPage
 │           └── components/
 │               ├── layout/   Sidebar, Topbar
-│               ├── sites/    SiteFleet, SiteTile (with crawl controls)
+│               ├── sites/    SiteFleet, SiteTile, SiteDetailDrawer, PageTypeIcon
 │               └── queue/    QueueMonitor
 ├── docker-compose.yml        PostgreSQL 16 (pgvector) + Redis 7
 ├── .env.example              Copy to .env before first run
@@ -62,6 +63,7 @@ Design system: `Sitebrief Design System/` — read `Sitebrief Design System/READ
 | Global state | Zustand |
 | Router | React Router v6 |
 | Styling | CSS custom properties (design tokens in `apps/web/src/styles/tokens.css`) |
+| Embeddings | OpenAI `text-embedding-3-small` (1536-dim) |
 
 ---
 
@@ -73,22 +75,28 @@ Design system: `Sitebrief Design System/` — read `Sitebrief Design System/READ
 # 1. Start Postgres + Redis
 docker compose up -d
 
-# 2. Copy env (already done; only needed on a fresh clone)
+# 2. Copy env (only needed on a fresh clone)
 cp .env.example .env
+# Set OPENAI_API_KEY for embeddings (optional: parse/classify still runs without it)
 
-# 3. Push schema and seed demo data
-npm run db:push    # creates tables
-npm run db:seed    # creates org + admin@sitebrief.dev / password123 + 2 sites
+# 3. Apply schema, then migrations (HNSW + unique index on pages)
+npm run db:push    # creates/updates tables from Prisma schema
+npm run db:migrate # applies prisma/migrations/* (vector indexes)
 
-# 4. Start both apps
+# 4. Seed demo data
+npm run db:seed    # org + admin@sitebrief.dev / password123 + 2 sites
+
+# 5. Start both apps
 npm run dev
 #   API  → http://localhost:3001/api/v1
 #   Web  → http://localhost:5173
 ```
 
+**Note:** If `prisma migrate` fails with access errors on `localhost:5432`, another Postgres may be bound to that port. Point `DATABASE_URL` at the Docker host/port you mapped (or change the compose port mapping).
+
 ---
 
-## API reference (Phase 1 endpoints)
+## API reference (Phase 1–2 endpoints)
 
 Base URL: `/api/v1`  
 Auth: `Authorization: Bearer <jwt>` on all routes except `/auth/login` and `/auth/register`
@@ -105,21 +113,22 @@ Auth: `Authorization: Bearer <jwt>` on all routes except `/auth/login` and `/aut
 | DELETE | `/sites/:id` | Cascade deletes pages + ideas |
 | POST | `/sites/:siteId/crawl` | Start crawl `{ depth? }` → `{ jobId, status }` |
 | DELETE | `/sites/:siteId/crawl` | Stop active crawl |
-| GET | `/sites/:siteId/crawl/status` | Job status + queue stats |
-| GET | `/sites/:siteId/pages` | Crawled pages for a site |
+| GET | `/sites/:siteId/crawl/status` | Job status + queue stats (`crawl`, `parse`, `ideas`, `workers`) |
+| GET | `/sites/:siteId/pages` | Pages for a site; optional `?type=landing\|blog\|product\|docs\|other` — returns `parsedAt`, `type`, `meta` (no raw HTML or embedding vector) |
 
 ---
 
 ## WebSocket events (Socket.io)
 
-Connect with `query: { orgId }` — client is auto-joined to `org:<orgId>` room.
+Connect with `query: { orgId }` — client is auto-joined to `org:<orgId>` room.  
+Emit `subscribe:site` with a `siteId` string to join `site:<siteId>` (used by the site detail drawer).
 
 | Event | Direction | Payload |
 |---|---|---|
 | `job.update` | Server → Client | `{ jobId, siteId, status, progress }` |
-| `crawl.page` | Server → Client | `{ siteId, url, pageType }` |
+| `crawl.page` | Server → Client | `{ siteId, url, pageType }` — fired after crawl and again after parse completes (refined type) |
 | `queue.stats` | Server → Client | `{ crawl, parse, ideas, workers }` |
-| `error.new` | Server → Client | `{ siteId, type, message, retryable }` |
+| `error.new` | Server → Client | `{ siteId, type, message, retryable }` — includes `parse_error` on final parse failure |
 
 ---
 
@@ -128,46 +137,44 @@ Connect with `query: { orgId }` — client is auto-joined to `org:<orgId>` room.
 | Phase | Weeks | Status | Notes |
 |---|---|---|---|
 | **1 — Multi-Site Foundation** | W1–3 | **Done** | Crawler, auth, sites CRUD, WebSocket, dashboard UI |
-| **2 — Parse & Embed Pipeline** | W4–6 | Not started | See below |
-| **3 — Ideas Engine** | W7–10 | Not started | Needs OpenAI key |
+| **2 — Parse & Embed Pipeline** | W4–6 | **Done** | `parse-queue`, HTML extract/clean/classify, OpenAI embed, pgvector + HNSW, pages `?type=`, site drawer + activity + crawl timeline |
+| **3 — Ideas Engine** | W7–10 | Not started | Needs OpenAI key (GPT + embeddings already wired) |
 | **4 — Dashboard v2 + Realtime** | W11–13 | Not started | |
 | **5 — Scheduling & Automation** | W14–15 | Not started | |
 
 ---
 
-## Phase 2 — what to build next
+## Phase 2 — implementation notes (for maintainers)
 
-**Goal:** Structured content, embeddings, page tree in UI.
+- **Queues:** `crawl-queue` (3 workers) + `parse-queue` (5 workers), both registered in `CrawlerModule`. After each successful page upsert, a Bull job named `parse:extract` runs the full **extract → clean → classify → embed** pipeline in one worker invocation (matches the four logical job types from the spec).
+- **Pages:** Upsert is keyed by **`@@unique([siteId, url])`**; `rawHtml` is stored on crawl and cleared after a successful parse (embedding runs before clear so retries keep HTML if OpenAI fails).
+- **pgvector:** `Page.embedding` and `Idea.embedding` use Prisma `Unsupported("vector(1536)")`; writes use raw SQL. Migration `20260504120000_phase2_parse_embed` adds extension, columns, unique index, and partial HNSW indexes.
+- **Frontend:** `SiteDetailDrawer` (480px), `PageTypeIcon`, crawl activity ring buffer in Zustand, `subscribe:site` on open.
 
-### Backend tasks
+---
 
-1. **`parse-queue`** — add a second BullMQ queue in `CrawlerModule` (or a new `ParserModule`).  
-   Trigger a `parse:extract` job after each page is saved in `CrawlProcessor`.
+## Phase 3 — what to build next
 
-2. **Parse jobs** (5 workers, no external rate limit):
-   - `parse:extract` — extract title, body text, meta from stored HTML  
-   - `parse:clean` — strip `<nav>`, `<header>`, `<footer>`, `<aside>`, elements with class `menu|sidebar|cookie|banner`; keep `<main>`, `<article>`, `[role="main"]`
-   - `parse:classify` — refine page type (extend `classifyPage` in `crawl.processor.ts`)
-   - `parse:embed` — call OpenAI `text-embedding-3-small`, store 1536-dim vector in pgvector
+**Goal:** Context-aware idea generation, scoring, deduplication (see `project-plan.md` §9 Phase 3).
 
-3. **pgvector** — add `embedding Unsupported("vector(1536)")` column to `Page` and `Idea` in `schema.prisma`. Run `prisma migrate dev`. Create HNSW index:
-   ```sql
-   CREATE INDEX ON pages USING hnsw (embedding vector_cosine_ops);
-   ```
+### Backend (high level)
 
-4. **New endpoint** — `GET /sites/:id/pages` already exists; add `?type=` filter and return `parsedAt`, `type`, `meta`.
+1. **`ideas-queue`** — BullMQ, ~2 workers, TPM-aware rate limit per org.
+2. **Jobs:** `ideas:generate`, `ideas:score`, `ideas:dedup`, `ideas:rank` (or a single pipeline job mirroring Phase 2’s pattern).
+3. **GPT-4o** — Pitch-briefing prompt, context bundle from parsed pages + embeddings.
+4. **Dedup** — cosine similarity vs existing `Idea.embedding` (threshold ~0.92).
+5. **APIs** — `POST /sites/:id/ideas/generate`, `GET /sites/:id/ideas`, `GET /ideas/:id` (full briefing).
 
-### Frontend tasks
+### Frontend (high level)
 
-1. **Site Detail Drawer** — slide-in panel (480px), triggered from `SiteTile`. Show tabs: Pages | Crawl history.
-2. **Page tree** — list pages grouped by `type` with type icons (landing/blog/product/docs/other).
-3. **Activity Stream** — basic list of recent `crawl.page` WebSocket events per site.
-4. **Crawl history timeline** — last 10 `crawlJobs` with status + duration.
+1. **Pitch card** component (anatomy in `project-plan.md` §8.5).
+2. **Ideas list** with filters; **detail modal**; status workflow (accept / reject / defer).
+3. **Aggregated ideas** panel on dashboard.
 
-### Environment variables needed for Phase 2
+### Environment
 
 ```env
-OPENAI_API_KEY=sk-...   # for parse:embed
+OPENAI_API_KEY=sk-...   # already required for embeddings; GPT calls in Phase 3
 ```
 
 ---
@@ -185,9 +192,9 @@ All UI work must follow `Sitebrief Design System/README.md`. Key rules:
 - No emoji in product UI.
 
 Existing React components to extend (not rewrite):
+
 - `apps/web/src/components/layout/Sidebar.tsx`
-- `apps/web/src/components/sites/SiteTile.tsx` — add click handler for drawer
-- `apps/web/src/components/sites/SiteFleet.tsx`
+- `apps/web/src/components/sites/SiteTile.tsx`, `SiteFleet.tsx`, `SiteDetailDrawer.tsx`
 
 ---
 
@@ -197,6 +204,9 @@ Existing React components to extend (not rewrite):
 |---|---|
 | `project-plan.md` | Full spec: data model, API design, queue params, prompts |
 | `Sitebrief Design System/README.md` | Brand voice, palette, type, layout rules |
-| `apps/api/src/crawler/crawl.processor.ts` | Core crawl logic — parse queue hooks in here |
-| `apps/api/prisma/schema.prisma` | Add pgvector columns here for Phase 2 |
+| `apps/api/src/crawler/crawl.processor.ts` | Crawl + enqueue parse |
+| `apps/api/src/crawler/parse.processor.ts` | Parse/embed pipeline |
+| `apps/api/src/crawler/html-parse.ts` | Extract + clean rules |
+| `apps/api/src/crawler/page-classifier.ts` | Page type heuristics |
+| `apps/api/prisma/schema.prisma` | Models + pgvector fields |
 | `apps/web/src/api/client.ts` | Shared TypeScript types for API responses |

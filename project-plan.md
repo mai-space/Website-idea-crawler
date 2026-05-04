@@ -711,6 +711,8 @@ Phase 1 ──── Phase 2 ──── Phase 3 ──── Phase 4 ───
 
 ### Phase 2 — Parse & Embed Pipeline *(Wochen 4–6)*
 
+> **Umsetzungsstatus (Repo):** Implementiert — siehe Agent-Handover `plan.md` (Phase 2).
+
 **Ziel:** Strukturierter Content, Embeddings, Seitenbaum
 
 **Backend:**

@@ -43,6 +43,13 @@ export function useSocket() {
       queryClient.invalidateQueries({ queryKey: ['site', payload.siteId, 'pages'] });
     });
 
+    socket.on('idea.new', (payload: { siteId: string }) => {
+      queryClient.invalidateQueries({ queryKey: ['ideas'] });
+      queryClient.invalidateQueries({ queryKey: ['site', payload.siteId, 'ideas'] });
+      queryClient.invalidateQueries({ queryKey: ['idea'] });
+      queryClient.invalidateQueries({ queryKey: ['sites'] });
+    });
+
     return () => {
       socket.disconnect();
       setConnected(false);

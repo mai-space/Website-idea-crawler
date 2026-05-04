@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/api/client';
-import type { PageRow, PageType, Site } from '@/api/client';
+import type {
+  IdeaBriefRow,
+  IdeaComplexity,
+  IdeaStatus,
+  PageRow,
+  PageType,
+  PaginatedIdeas,
+  Site,
+} from '@/api/client';
 import { useSocketStore } from '@/store';
 import { PageTypeIcon } from './PageTypeIcon';
+import { PitchCard } from '@/components/ideas/PitchCard';
+import { IdeaDetailModal } from '@/components/ideas/IdeaDetailModal';
 
 const PAGE_ORDER: PageType[] = ['landing', 'blog', 'product', 'docs', 'other'];
 
@@ -27,9 +37,16 @@ function jobStatusLabel(status: string): string {
   return status;
 }
 
+type IdeaArea = 'content' | 'seo' | 'feature' | 'ux';
+
 export function SiteDetailDrawer({ siteId, onClose }: Props) {
-  const [tab, setTab] = useState<'pages' | 'history'>('pages');
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<'pages' | 'history' | 'briefs'>('pages');
   const [typeFilter, setTypeFilter] = useState<PageType | null>(null);
+  const [detailIdeaId, setDetailIdeaId] = useState<string | null>(null);
+  const [ideaStatus, setIdeaStatus] = useState<IdeaStatus | null>(null);
+  const [ideaComplexity, setIdeaComplexity] = useState<IdeaComplexity | null>(null);
+  const [ideaArea, setIdeaArea] = useState<IdeaArea | null>(null);
   const socket = useSocketStore((s) => s.socket);
   const connected = useSocketStore((s) => s.connected);
   const crawlPageActivity = useSocketStore((s) => s.crawlPageActivity);
@@ -45,11 +62,13 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (detailIdeaId) setDetailIdeaId(null);
+      else onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, detailIdeaId]);
 
   const { data: site } = useQuery({
     queryKey: ['site', siteId],
@@ -66,6 +85,40 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
       return api.get<PageRow[]>(`/sites/${siteId}/pages${q}`).then((r) => r.data);
     },
     enabled: Boolean(siteId) && tab === 'pages',
+  });
+
+  const ideasQueryKey = ['site', siteId, 'ideas', ideaStatus ?? 'all', ideaComplexity ?? 'all', ideaArea ?? 'all'] as const;
+
+  const { data: ideasPage, isLoading: ideasLoading } = useQuery({
+    queryKey: ideasQueryKey,
+    queryFn: () => {
+      const params: Record<string, string | number> = { page: 1, limit: 40, sort: 'impact' };
+      if (ideaStatus) params.status = ideaStatus;
+      if (ideaComplexity) params.complexity = ideaComplexity;
+      if (ideaArea) params.area = ideaArea;
+      return api.get<PaginatedIdeas>(`/sites/${siteId}/ideas`, { params }).then((r) => r.data);
+    },
+    enabled: Boolean(siteId) && tab === 'briefs',
+  });
+
+  const generateIdeas = useMutation({
+    mutationFn: () => api.post<{ jobId: string; status: string }>(`/sites/${siteId}/ideas/generate`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sites'] });
+      qc.invalidateQueries({ queryKey: ['site', siteId] });
+      qc.invalidateQueries({ queryKey: ['site', siteId, 'ideas'] });
+      qc.invalidateQueries({ queryKey: ['ideas'] });
+    },
+  });
+
+  const patchIdeaStatus = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: IdeaStatus }) =>
+      api.patch(`/ideas/${id}`, { status }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['site', siteId, 'ideas'] });
+      qc.invalidateQueries({ queryKey: ['ideas'] });
+      qc.invalidateQueries({ queryKey: ['sites'] });
+    },
   });
 
   const grouped = useMemo(() => {
@@ -156,8 +209,8 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: 6, marginTop: 16 }}>
-            {(['pages', 'history'] as const).map((t) => (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 16 }}>
+            {(['pages', 'history', 'briefs'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -175,7 +228,7 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
                   textTransform: 'capitalize',
                 }}
               >
-                {t === 'pages' ? 'Pages' : 'Crawl history'}
+                {t === 'pages' ? 'Pages' : t === 'history' ? 'Crawl history' : 'Briefs'}
               </button>
             ))}
           </div>
@@ -300,8 +353,84 @@ export function SiteDetailDrawer({ siteId, onClose }: Props) {
               ))}
             </div>
           )}
+
+          {tab === 'briefs' && (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+                <button
+                  type="button"
+                  onClick={() => generateIdeas.mutate()}
+                  disabled={generateIdeas.isPending || site?.status === 'analyzing' || site?.status === 'crawling'}
+                  style={{
+                    alignSelf: 'flex-start',
+                    padding: '8px 16px',
+                    borderRadius: 'var(--r-md)',
+                    border: '1px solid var(--rule)',
+                    background: 'var(--accent)',
+                    color: '#fff',
+                    fontFamily: 'var(--font-ui)',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: site?.status === 'analyzing' || site?.status === 'crawling' ? 'not-allowed' : 'pointer',
+                    opacity: generateIdeas.isPending || site?.status === 'analyzing' || site?.status === 'crawling' ? 0.65 : 1,
+                  }}
+                >
+                  {generateIdeas.isPending || site?.status === 'analyzing' ? 'Generating…' : 'Generate pitch briefs'}
+                </button>
+                <p style={{ fontSize: 12, color: 'var(--ink-3)', lineHeight: 1.5, margin: 0 }}>
+                  Uses parsed pages and GPT-4o. Requires <span style={{ fontFamily: 'var(--font-mono)' }}>OPENAI_API_KEY</span>.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                <FilterChip label="All status" active={ideaStatus === null} onClick={() => setIdeaStatus(null)} />
+                {(['open', 'accepted', 'rejected', 'deferred', 'done'] as const).map((s) => (
+                  <FilterChip key={s} label={s} active={ideaStatus === s} onClick={() => setIdeaStatus(s)} />
+                ))}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                <FilterChip label="All complexity" active={ideaComplexity === null} onClick={() => setIdeaComplexity(null)} />
+                {(['low', 'medium', 'high'] as const).map((c) => (
+                  <FilterChip key={c} label={c} active={ideaComplexity === c} onClick={() => setIdeaComplexity(c)} />
+                ))}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+                <FilterChip label="All areas" active={ideaArea === null} onClick={() => setIdeaArea(null)} />
+                {(['content', 'seo', 'feature', 'ux'] as const).map((a) => (
+                  <FilterChip key={a} label={a} active={ideaArea === a} onClick={() => setIdeaArea(a)} />
+                ))}
+              </div>
+
+              {ideasLoading && <p style={{ fontSize: 13, color: 'var(--ink-3)' }}>Loading briefs…</p>}
+
+              {!ideasLoading && ideasPage && ideasPage.items.length === 0 && (
+                <p style={{ fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.55 }}>
+                  No briefs match these filters. Generate new ideas once pages are parsed.
+                </p>
+              )}
+
+              {!ideasLoading && ideasPage && ideasPage.items.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {ideasPage.items.map((row: IdeaBriefRow) => (
+                    <PitchCard
+                      key={row.id}
+                      idea={row}
+                      onOpen={() => setDetailIdeaId(row.id)}
+                      onStatus={
+                        row.status === 'open'
+                          ? (st) => patchIdeaStatus.mutate({ id: row.id, status: st })
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </aside>
+
+      <IdeaDetailModal ideaId={detailIdeaId} onClose={() => setDetailIdeaId(null)} />
     </div>
   );
 }
@@ -321,7 +450,7 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
         color: active ? 'var(--ink)' : 'var(--ink-2)',
         cursor: 'pointer',
         fontFamily: 'var(--font-ui)',
-        textTransform: label === 'All' ? 'none' : 'lowercase',
+        textTransform: label === 'All' || label.startsWith('All ') ? 'none' : 'lowercase',
       }}
     >
       {label}

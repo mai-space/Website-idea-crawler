@@ -734,6 +734,8 @@ Phase 1 ──── Phase 2 ──── Phase 3 ──── Phase 4 ───
 
 ### Phase 3 — Ideas Engine v2 *(Wochen 7–10)*
 
+> **Umsetzungsstatus (Repo):** Implementiert — siehe Agent-Handover `plan.md` (Phase 3).
+
 **Ziel:** Kontextbewusste Ideengenerierung, Scoring, Deduplication
 
 **Backend:**

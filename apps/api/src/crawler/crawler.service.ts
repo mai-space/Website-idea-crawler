@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { CRAWL_QUEUE, type CrawlPageJob } from './crawl.constants';
 import { PARSE_QUEUE } from './parse.constants';
+import { IDEAS_QUEUE } from './ideas.constants';
 
 export interface StartCrawlDto {
   depth?: number;
@@ -19,6 +20,7 @@ export class CrawlerService {
     private readonly events: EventsGateway,
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue,
     @InjectQueue(PARSE_QUEUE) private readonly parseQueue: Queue,
+    @InjectQueue(IDEAS_QUEUE) private readonly ideasQueue: Queue,
   ) {}
 
   async startCrawl(orgId: string, siteId: string, dto: StartCrawlDto = {}) {
@@ -108,13 +110,13 @@ export class CrawlerService {
     const [crawlCount, parseCount, ideasCount] = await Promise.all([
       this.crawlQueue.getWaitingCount(),
       this.parseQueue.getWaitingCount(),
-      Promise.resolve(0),
+      this.ideasQueue.getWaitingCount(),
     ]);
 
     return {
       siteStatus: site.status,
       activeJob,
-      queueStats: { crawl: crawlCount, parse: parseCount, ideas: ideasCount, workers: 8 },
+      queueStats: { crawl: crawlCount, parse: parseCount, ideas: ideasCount, workers: 10 },
     };
   }
 

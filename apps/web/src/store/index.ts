@@ -52,7 +52,7 @@ const MAX_ACTIVITY = 200;
 export const useSocketStore = create<SocketState>((set) => ({
   connected: false,
   socket: null,
-  queueStats: { crawl: 0, parse: 0, ideas: 0, workers: 0 },
+  queueStats: { crawl: 0, parse: 0, ideas: 0, workers: 10 },
   crawlPageActivity: [],
   setConnected: (connected) => set({ connected }),
   setSocket: (socket) => set({ socket }),

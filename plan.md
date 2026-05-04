@@ -1,7 +1,7 @@
 # Sitebrief — Agent Handover
 
 > Last updated: 2026-05-04  
-> Completed through: **Phase 2 — Parse & Embed Pipeline**
+> Completed through: **Phase 3 — Ideas Engine**
 
 ---
 
@@ -21,13 +21,13 @@ Design system: `Sitebrief Design System/` — read `Sitebrief Design System/READ
 ├── apps/
 │   ├── api/                  NestJS backend (Node 20, TypeScript)
 │   │   ├── prisma/
-│   │   │   ├── schema.prisma All tables + enums + pgvector columns on Page/Idea
-│   │   │   ├── migrations/   SQL: vector extension, HNSW indexes, unique(site_id,url)
+│   │   │   ├── schema.prisma All tables + enums + pgvector on Page/Idea; Idea.cmsHint
+│   │   │   ├── migrations/   SQL: vector extension, HNSW, phase2 pages, phase3 cms_hint
 │   │   │   └── seed.ts       Demo org + admin user + 2 sites
 │   │   └── src/
 │   │       ├── auth/         JWT login/register/me
 │   │       ├── sites/        Sites CRUD (org-scoped)
-│   │       ├── crawler/      BullMQ crawl-queue + parse-queue, processors, rate-limiter
+│   │       ├── crawler/      BullMQ crawl + parse + ideas queues, processors, DTOs, ideas.service
 │   │       ├── events/       Socket.io WebSocket gateway
 │   │       └── prisma/       Global PrismaService
 │   └── web/                  React 18 + Vite + TypeScript frontend
@@ -39,6 +39,7 @@ Design system: `Sitebrief Design System/` — read `Sitebrief Design System/READ
 │           └── components/
 │               ├── layout/   Sidebar, Topbar
 │               ├── sites/    SiteFleet, SiteTile, SiteDetailDrawer, PageTypeIcon
+│               ├── ideas/    PitchCard, IdeaDetailModal, IdeasPanel
 │               └── queue/    QueueMonitor
 ├── docker-compose.yml        PostgreSQL 16 (pgvector) + Redis 7
 ├── .env.example              Copy to .env before first run
@@ -64,6 +65,7 @@ Design system: `Sitebrief Design System/` — read `Sitebrief Design System/READ
 | Router | React Router v6 |
 | Styling | CSS custom properties (design tokens in `apps/web/src/styles/tokens.css`) |
 | Embeddings | OpenAI `text-embedding-3-small` (1536-dim) |
+| Ideas LLM | OpenAI `gpt-4o` (JSON pitch briefings) |
 
 ---
 
@@ -77,11 +79,11 @@ docker compose up -d
 
 # 2. Copy env (only needed on a fresh clone)
 cp .env.example .env
-# Set OPENAI_API_KEY for embeddings (optional: parse/classify still runs without it)
+# Set OPENAI_API_KEY for embeddings + idea generation (parse still runs without it; ideas need the key)
 
-# 3. Apply schema, then migrations (HNSW + unique index on pages)
+# 3. Apply schema, then migrations (HNSW + unique index on pages + idea cms_hint)
 npm run db:push    # creates/updates tables from Prisma schema
-npm run db:migrate # applies prisma/migrations/* (vector indexes)
+npm run db:migrate # applies prisma/migrations/*
 
 # 4. Seed demo data
 npm run db:seed    # org + admin@sitebrief.dev / password123 + 2 sites
@@ -96,7 +98,7 @@ npm run dev
 
 ---
 
-## API reference (Phase 1–2 endpoints)
+## API reference (Phase 1–3 endpoints)
 
 Base URL: `/api/v1`  
 Auth: `Authorization: Bearer <jwt>` on all routes except `/auth/login` and `/auth/register`
@@ -113,8 +115,13 @@ Auth: `Authorization: Bearer <jwt>` on all routes except `/auth/login` and `/aut
 | DELETE | `/sites/:id` | Cascade deletes pages + ideas |
 | POST | `/sites/:siteId/crawl` | Start crawl `{ depth? }` → `{ jobId, status }` |
 | DELETE | `/sites/:siteId/crawl` | Stop active crawl |
-| GET | `/sites/:siteId/crawl/status` | Job status + queue stats (`crawl`, `parse`, `ideas`, `workers`) |
+| GET | `/sites/:siteId/crawl/status` | Job status + queue stats (`crawl`, `parse`, `ideas`, `workers` = 10) |
 | GET | `/sites/:siteId/pages` | Pages for a site; optional `?type=landing\|blog\|product\|docs\|other` — returns `parsedAt`, `type`, `meta` (no raw HTML or embedding vector) |
+| POST | `/sites/:siteId/ideas/generate` | Queue ideas pipeline → `{ jobId, status: 'queued' }` (requires parsed pages + `OPENAI_API_KEY`; sets site `analyzing` until job finishes) |
+| GET | `/sites/:siteId/ideas` | Paginated ideas: query `complexity`, `requires_dev`, `area`, `status`, `sort`, `page`, `limit` → `{ items, total, page, limit }` |
+| GET | `/ideas` | Org-wide ideas; same query params + optional `site_id` (must belong to org) |
+| GET | `/ideas/:id` | Full pitch briefing + `sourcePages`, `reasoning`, `cmsHint`, `displayHours` |
+| PATCH | `/ideas/:id` | `{ status?, notes?, customHours? }` |
 
 ---
 
@@ -125,10 +132,11 @@ Emit `subscribe:site` with a `siteId` string to join `site:<siteId>` (used by th
 
 | Event | Direction | Payload |
 |---|---|---|
-| `job.update` | Server → Client | `{ jobId, siteId, status, progress }` |
+| `job.update` | Server → Client | `{ jobId, siteId, status, progress }` — also used for ideas Bull job id |
 | `crawl.page` | Server → Client | `{ siteId, url, pageType }` — fired after crawl and again after parse completes (refined type) |
 | `queue.stats` | Server → Client | `{ crawl, parse, ideas, workers }` |
-| `error.new` | Server → Client | `{ siteId, type, message, retryable }` — includes `parse_error` on final parse failure |
+| `error.new` | Server → Client | `{ siteId, type, message, retryable }` — includes `parse_error`, `ideas_error` |
+| `idea.new` | Server → Client | `{ ideaId, siteId, title }` — to `org:<orgId>` and `site:<siteId>` |
 
 ---
 
@@ -138,7 +146,7 @@ Emit `subscribe:site` with a `siteId` string to join `site:<siteId>` (used by th
 |---|---|---|---|
 | **1 — Multi-Site Foundation** | W1–3 | **Done** | Crawler, auth, sites CRUD, WebSocket, dashboard UI |
 | **2 — Parse & Embed Pipeline** | W4–6 | **Done** | `parse-queue`, HTML extract/clean/classify, OpenAI embed, pgvector + HNSW, pages `?type=`, site drawer + activity + crawl timeline |
-| **3 — Ideas Engine** | W7–10 | Not started | Needs OpenAI key (GPT + embeddings already wired) |
+| **3 — Ideas Engine** | W7–10 | **Done** | `ideas-queue` (2 workers), GPT-4o JSON briefs, embed + dedup (0.92), REST + Briefs tab + `IdeasPanel` + `idea.new` |
 | **4 — Dashboard v2 + Realtime** | W11–13 | Not started | |
 | **5 — Scheduling & Automation** | W14–15 | Not started | |
 
@@ -153,29 +161,20 @@ Emit `subscribe:site` with a `siteId` string to join `site:<siteId>` (used by th
 
 ---
 
-## Phase 3 — what to build next
+## Phase 3 — implementation notes (for maintainers)
 
-**Goal:** Context-aware idea generation, scoring, deduplication (see `project-plan.md` §9 Phase 3).
+- **Queues:** `ideas-queue` (2 workers), job name `ideas:pipeline` — context bundle → **GPT-4o** (`response_format: json_object`) → per-idea **embedding** + **dedup** (`1 - (embedding <=> candidate) > 0.92` vs existing site ideas) → Prisma `Idea` + `IdeaSource` rows. `MIN_CONFIDENCE` 0.6 drops weak items.
+- **Site lock:** `IdeasService.enqueueGenerate` sets `Site.status` to `analyzing` until `IdeasProcessor` `finally` resets `idle` (also on early GPT/JSON failures).
+- **Schema:** `Idea.cmsHint` (VARCHAR 1024); pitch reasoning stored in `Idea.description` for API field `reasoning`.
+- **Frontend:** `PitchCard`, `IdeaDetailModal`, dashboard `IdeasPanel`, drawer **Briefs** tab with filters; socket `idea.new` invalidates TanStack Query.
 
-### Backend (high level)
+---
 
-1. **`ideas-queue`** — BullMQ, ~2 workers, TPM-aware rate limit per org.
-2. **Jobs:** `ideas:generate`, `ideas:score`, `ideas:dedup`, `ideas:rank` (or a single pipeline job mirroring Phase 2’s pattern).
-3. **GPT-4o** — Pitch-briefing prompt, context bundle from parsed pages + embeddings.
-4. **Dedup** — cosine similarity vs existing `Idea.embedding` (threshold ~0.92).
-5. **APIs** — `POST /sites/:id/ideas/generate`, `GET /sites/:id/ideas`, `GET /ideas/:id` (full briefing).
+## Phase 4 — what to build next
 
-### Frontend (high level)
+**Goal:** Full dashboard UX, exports, richer realtime (see `project-plan.md` §9 Phase 4).
 
-1. **Pitch card** component (anatomy in `project-plan.md` §8.5).
-2. **Ideas list** with filters; **detail modal**; status workflow (accept / reject / defer).
-3. **Aggregated ideas** panel on dashboard.
-
-### Environment
-
-```env
-OPENAI_API_KEY=sk-...   # already required for embeddings; GPT calls in Phase 3
-```
+- Org-wide `GET /ideas` aggregation polish, export JSON/CSV/PDF, activity stream virtualization, Kanban board, manual hours UX, remaining WebSocket coverage.
 
 ---
 
@@ -206,6 +205,8 @@ Existing React components to extend (not rewrite):
 | `Sitebrief Design System/README.md` | Brand voice, palette, type, layout rules |
 | `apps/api/src/crawler/crawl.processor.ts` | Crawl + enqueue parse |
 | `apps/api/src/crawler/parse.processor.ts` | Parse/embed pipeline |
+| `apps/api/src/crawler/ideas.processor.ts` | Ideas pipeline (GPT + dedup) |
+| `apps/api/src/crawler/ideas.service.ts` | Ideas REST + enqueue |
 | `apps/api/src/crawler/html-parse.ts` | Extract + clean rules |
 | `apps/api/src/crawler/page-classifier.ts` | Page type heuristics |
 | `apps/api/prisma/schema.prisma` | Models + pgvector fields |

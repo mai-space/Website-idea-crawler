@@ -68,3 +68,68 @@ export interface AuthUser {
   orgId: string;
   role: string;
 }
+
+export type IdeaComplexity = 'low' | 'medium' | 'high';
+export type IdeaStatus = 'open' | 'accepted' | 'rejected' | 'deferred' | 'done';
+
+export interface IdeaListSite {
+  id: string;
+  name: string;
+  url: string;
+}
+
+export interface IdeaBriefRow {
+  id: string;
+  siteId: string;
+  title: string;
+  pitchText: string;
+  cmsHint?: string | null;
+  complexity: IdeaComplexity;
+  estimatedHours: number;
+  customHours: number | null;
+  requiresDev: boolean;
+  areas: string[];
+  confidence: number;
+  impactScore: number;
+  status: IdeaStatus;
+  generatedAt: string;
+  site?: IdeaListSite;
+}
+
+export interface PaginatedIdeas {
+  items: IdeaBriefRow[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface IdeaSourcePage {
+  id: string;
+  url: string;
+  type: PageType;
+  title: string | null;
+}
+
+export interface IdeaDetail {
+  id: string;
+  siteId: string;
+  siteName: string;
+  siteUrl: string;
+  cms: Site['cms'];
+  title: string;
+  pitchText: string;
+  complexity: IdeaComplexity;
+  estimatedHours: number;
+  displayHours: number;
+  customHours: number | null;
+  requiresDev: boolean;
+  areas: string[];
+  confidence: number;
+  impactScore: number;
+  status: IdeaStatus;
+  cmsHint: string | null;
+  reasoning: string | null;
+  sourcePages: IdeaSourcePage[];
+  notes: string | null;
+  generatedAt: string;
+}

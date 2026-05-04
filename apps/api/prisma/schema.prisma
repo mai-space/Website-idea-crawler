@@ -163,6 +163,7 @@ model Idea {
   title          String         @db.VarChar(512)
   pitchText      String         @map("pitch_text")
   description    String?
+  cmsHint        String?        @map("cms_hint") @db.VarChar(1024)
   complexity     IdeaComplexity @default(medium)
   estimatedHours Int            @default(0) @map("estimated_hours")
   requiresDev    Boolean        @default(false) @map("requires_dev")

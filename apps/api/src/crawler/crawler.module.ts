@@ -9,6 +9,10 @@ import { QueueStatsEmitter } from './queue-stats.emitter';
 import { EventsModule } from '../events/events.module';
 import { CRAWL_QUEUE } from './crawl.constants';
 import { PARSE_QUEUE } from './parse.constants';
+import { IDEAS_QUEUE } from './ideas.constants';
+import { IdeasProcessor } from './ideas.processor';
+import { IdeasService } from './ideas.service';
+import { IdeasController } from './ideas.controller';
 
 @Module({
   imports: [
@@ -20,11 +24,19 @@ import { PARSE_QUEUE } from './parse.constants';
         },
       }),
     }),
-    BullModule.registerQueue({ name: CRAWL_QUEUE }, { name: PARSE_QUEUE }),
+    BullModule.registerQueue({ name: CRAWL_QUEUE }, { name: PARSE_QUEUE }, { name: IDEAS_QUEUE }),
     EventsModule,
   ],
-  providers: [CrawlerService, CrawlProcessor, ParseProcessor, RateLimiterService, QueueStatsEmitter],
-  controllers: [CrawlerController],
-  exports: [CrawlerService],
+  providers: [
+    CrawlerService,
+    CrawlProcessor,
+    ParseProcessor,
+    IdeasProcessor,
+    IdeasService,
+    RateLimiterService,
+    QueueStatsEmitter,
+  ],
+  controllers: [CrawlerController, IdeasController],
+  exports: [CrawlerService, IdeasService],
 })
 export class CrawlerModule {}

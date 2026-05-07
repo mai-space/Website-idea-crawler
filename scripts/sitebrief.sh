@@ -16,6 +16,7 @@ JWT_TEMPLATE_PLACEHOLDER='change-me-in-production-min-32-chars'
 JWT_DEV_PLACEHOLDER='dev-secret-change-in-production'
 PROCESS_START_WAIT_SECONDS=3
 PROCESS_STOP_MAX_ATTEMPTS=20
+PRISMA_LOCAL_BOOTSTRAP_FALLBACK_PATTERN='P1010|P3018|relation "[^"]+" does not exist|type "vector" does not exist'
 
 say() {
   printf '[sitebrief] %s\n' "$*"
@@ -287,8 +288,15 @@ start_infra() {
 }
 
 prepare_local_postgres_access() {
+  local sql
+  read -r -d '' sql <<'SQL' || true
+GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;
+ALTER SCHEMA public OWNER TO CURRENT_USER;
+CREATE EXTENSION IF NOT EXISTS vector;
+SQL
+
   say 'Preparing PostgreSQL schema access'
-  if run_prisma_db_execute $'GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;\nALTER SCHEMA public OWNER TO CURRENT_USER;\nCREATE EXTENSION IF NOT EXISTS vector;'; then
+  if run_prisma_db_execute "$sql"; then
     return 0
   fi
 
@@ -305,7 +313,7 @@ try_prisma_migrate_deploy() {
     return 0
   fi
 
-  if grep -Eq 'P1010|P3018|relation "[^"]+" does not exist|type "vector" does not exist' "$output_file"; then
+  if grep -Eq "$PRISMA_LOCAL_BOOTSTRAP_FALLBACK_PATTERN" "$output_file"; then
     rm -f "$output_file"
     return 2
   fi
@@ -315,10 +323,14 @@ try_prisma_migrate_deploy() {
 }
 
 prepare_database() {
+  local schema_access_failed=0
+
   say 'Generating Prisma client'
   run_in_project npm run db:generate --workspace=apps/api
 
-  prepare_local_postgres_access || true
+  if ! prepare_local_postgres_access; then
+    schema_access_failed=1
+  fi
 
   say 'Applying Prisma migrations'
   if try_prisma_migrate_deploy; then
@@ -331,8 +343,13 @@ prepare_database() {
   fi
 
   warn 'Prisma migrate deploy could not initialize the local database; syncing the schema with Prisma db push instead.'
-  prepare_local_postgres_access || true
-  run_in_api npm exec prisma db push -- --accept-data-loss
+  if (( schema_access_failed == 0 )) || prepare_local_postgres_access; then
+    run_in_api npm exec prisma db push -- --accept-data-loss
+    return 0
+  fi
+
+  warn 'Skipping Prisma db push fallback because PostgreSQL schema access could not be normalized automatically.'
+  return 1
 }
 
 is_pid_running() {

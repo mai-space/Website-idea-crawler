@@ -96,9 +96,16 @@ Edit `apps/api/.env` and set at least:
 
 ### 4. Generate Prisma client and bootstrap the local database schema
 
+For a brand-new local database, use `db push` after enabling the `vector` extension. The checked-in migrations cover incremental updates, so `prisma migrate deploy` is still best reserved for environments that already have Prisma migration history.
+
 ```bash
 npm run db:generate --workspace=apps/api
-(cd apps/api && printf 'GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;\nALTER SCHEMA public OWNER TO CURRENT_USER;\nCREATE EXTENSION IF NOT EXISTS vector;\n' | npm exec prisma db execute -- --stdin --schema prisma/schema.prisma)
+(cd apps/api && cat <<'SQL' | npm exec prisma db execute -- --stdin --schema prisma/schema.prisma
+GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;
+ALTER SCHEMA public OWNER TO CURRENT_USER;
+CREATE EXTENSION IF NOT EXISTS vector;
+SQL
+)
 (cd apps/api && npm exec prisma db push -- --accept-data-loss)
 ```
 

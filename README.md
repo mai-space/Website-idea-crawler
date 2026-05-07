@@ -96,7 +96,11 @@ Edit `apps/api/.env` and set at least:
 
 ### 4. Generate Prisma client and bootstrap the local database schema
 
-For a brand-new local database, use `db push` after enabling the `vector` extension. The checked-in migrations cover incremental updates, so `prisma migrate deploy` is still best reserved for environments that already have Prisma migration history.
+For a brand-new database created by the default local Docker Compose setup, use `db push` after enabling the `vector` extension. The checked-in migrations cover incremental updates, so `prisma migrate deploy` is still best reserved for environments that already have Prisma migration history.
+
+If you are using an external or managed Postgres instance instead of the bundled Docker Postgres, do not assume the `ALTER SCHEMA` / `CREATE EXTENSION` statements below will work there. Use the permissions and extension workflow required by your provider, or skip those commands if the database is already prepared.
+
+Only run the final `db push --accept-data-loss` command against an empty local development database.
 
 ```bash
 npm run db:generate --workspace=apps/api

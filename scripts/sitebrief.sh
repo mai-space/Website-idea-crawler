@@ -16,7 +16,7 @@ JWT_TEMPLATE_PLACEHOLDER='change-me-in-production-min-32-chars'
 JWT_DEV_PLACEHOLDER='dev-secret-change-in-production'
 PROCESS_START_WAIT_SECONDS=3
 PROCESS_STOP_MAX_ATTEMPTS=20
-PRISMA_LOCAL_BOOTSTRAP_FALLBACK_PATTERN='P1010|P3018|relation "[^"]+" does not exist|type "vector" does not exist'
+PRISMA_LOCAL_BOOTSTRAP_FALLBACK_PATTERN='P1010|relation "[^"]+" does not exist|type "vector" does not exist'
 
 say() {
   printf '[sitebrief] %s\n' "$*"
@@ -91,6 +91,38 @@ run_prisma_db_execute() {
   local sql="$1"
 
   printf '%s\n' "$sql" | run_in_api npm exec prisma db execute -- --stdin --schema prisma/schema.prisma
+}
+
+is_default_local_database_url() {
+  local parsed_database_url
+  local protocol
+  local username
+  local hostname
+  local port
+  local database_name
+
+  parsed_database_url="$(
+    DATABASE_URL="$DATABASE_URL" node <<'NODE'
+const { URL } = require('node:url');
+
+try {
+  const databaseUrl = new URL(process.env.DATABASE_URL || '');
+  const databaseName = databaseUrl.pathname.replace(/^\/+/, '').split('/')[0];
+  const port = databaseUrl.port || '5432';
+  process.stdout.write([databaseUrl.protocol, decodeURIComponent(databaseUrl.username), databaseUrl.hostname, port, databaseName].join('\t'));
+} catch {
+  process.exit(1);
+}
+NODE
+  )" || return 1
+
+  IFS=$'\t' read -r protocol username hostname port database_name <<< "$parsed_database_url"
+
+  [[ "$protocol" == 'postgres:' || "$protocol" == 'postgresql:' ]] || return 1
+  [[ "$username" == 'sitebrief' ]] || return 1
+  [[ "$hostname" == 'localhost' || "$hostname" == '127.0.0.1' ]] || return 1
+  [[ "$port" == '5432' ]] || return 1
+  [[ "$database_name" == 'sitebrief' ]] || return 1
 }
 
 ensure_state_dir() {
@@ -295,6 +327,8 @@ ALTER SCHEMA public OWNER TO CURRENT_USER;
 CREATE EXTENSION IF NOT EXISTS vector;
 SQL
 
+  is_default_local_database_url || return 0
+
   say 'Preparing PostgreSQL schema access'
   if run_prisma_db_execute "$sql"; then
     return 0
@@ -302,6 +336,49 @@ SQL
 
   warn 'Unable to normalize PostgreSQL schema access automatically. If this is a reused local Docker volume, run `docker compose down -v` from the project root and rerun the command.'
   return 1
+}
+
+is_safe_local_db_push_fallback() {
+  local postgres_container_id
+  local table_check_sql
+  local table_check_result
+
+  if ! is_default_local_database_url; then
+    warn 'Skipping Prisma db push fallback because DATABASE_URL is not using the default local Docker Postgres connection.'
+    return 1
+  fi
+
+  postgres_container_id="$(docker_compose ps -q postgres 2>/dev/null || true)"
+  if [[ -z "$postgres_container_id" ]]; then
+    warn 'Skipping Prisma db push fallback because the local PostgreSQL container could not be identified.'
+    return 1
+  fi
+
+  read -r -d '' table_check_sql <<'SQL' || true
+SELECT CASE
+  WHEN EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_type = 'BASE TABLE'
+      AND table_name <> '_prisma_migrations'
+  ) THEN 'no'
+  ELSE 'yes'
+END;
+SQL
+
+  table_check_result="$(
+    docker exec "$postgres_container_id" \
+      psql -U sitebrief -d sitebrief -tAc "$table_check_sql" 2>/dev/null | tr -d '[:space:]'
+  )" || {
+    warn 'Skipping Prisma db push fallback because the local database state could not be inspected automatically.'
+    return 1
+  }
+
+  if [[ "$table_check_result" != 'yes' ]]; then
+    warn 'Skipping Prisma db push fallback because the local database already contains application tables.'
+    return 1
+  fi
 }
 
 try_prisma_migrate_deploy() {
@@ -343,12 +420,12 @@ prepare_database() {
   fi
 
   warn 'Prisma migrate deploy could not initialize the local database; syncing the schema with Prisma db push instead.'
-  if (( schema_access_failed == 0 )) || prepare_local_postgres_access; then
+  if ((( schema_access_failed == 0 )) || prepare_local_postgres_access) && is_safe_local_db_push_fallback; then
     run_in_api npm exec prisma db push -- --accept-data-loss
     return 0
   fi
 
-  warn 'Skipping Prisma db push fallback because PostgreSQL schema access could not be normalized automatically.'
+  warn 'Skipping Prisma db push fallback because this does not look like a fresh default local Docker database.'
   return 1
 }
 

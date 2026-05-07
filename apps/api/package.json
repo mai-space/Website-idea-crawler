@@ -13,6 +13,7 @@
     "db:seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.27.0",
     "@nestjs/bullmq": "^10.2.2",
     "@nestjs/common": "^10.3.10",
     "@nestjs/config": "^3.2.3",

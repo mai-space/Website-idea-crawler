@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import type { CmsType, PageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,6 +17,47 @@ const MAX_IDEAS_PER_RUN = 15;
 const MAX_PAGES_PER_BUNDLE = 50;
 
 const VALID_AREAS = new Set(['content', 'seo', 'feature', 'ux']);
+
+// JSON schema shared between the Claude tool definition and OpenAI JSON-mode prompt
+const IDEA_ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string', description: 'Max 8 words, action-oriented' },
+    pitchText: { type: 'string', description: '2-3 sentences, plain language for non-technical buyers, no markdown' },
+    cmsHint: { type: ['string', 'null'], description: 'CMS-specific implementation hint, or null' },
+    type: { type: 'string', enum: ['blog_post', 'seo_fix', 'new_section', 'api_integration', 'feature', 'other'] },
+    areas: {
+      type: 'array',
+      items: { type: 'string', enum: ['content', 'seo', 'feature', 'ux'] },
+      minItems: 1,
+      maxItems: 3,
+    },
+    complexity: { type: 'string', enum: ['low', 'medium', 'high'] },
+    estimatedHours: { type: 'number', description: 'Realistic hours for the CMS' },
+    requiresDev: { type: 'boolean' },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    impactScore: { type: 'number', minimum: 0, maximum: 1 },
+    reasoning: { type: 'string', description: 'Short technical rationale' },
+    sourcePageUrls: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'URL paths from the context bundle that best support this idea',
+    },
+  },
+  required: ['title', 'pitchText', 'type', 'areas', 'complexity', 'estimatedHours', 'requiresDev', 'confidence'],
+} as const;
+
+const IDEAS_RESPONSE_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    ideas: {
+      type: 'array',
+      items: IDEA_ITEM_SCHEMA,
+      maxItems: MAX_IDEAS_PER_RUN,
+    },
+  },
+  required: ['ideas'],
+} as const;
 
 interface ContextPage {
   url: string;
@@ -74,9 +116,20 @@ function clampAreas(raw: string[] | undefined): string[] {
   return out.length ? out : ['content'];
 }
 
+const SYSTEM_PROMPT = `You are a senior agency strategist. Your job is to produce decision-ready website improvement ideas (pitch briefings) for an agency's clients.
+
+Guidelines:
+- Each idea must be specific, actionable, and backed by evidence from the site's pages.
+- Pitch text should be plain language suitable for non-technical clients — no markdown, no jargon.
+- Hour estimates must be realistic for the given CMS type.
+- Avoid generic ideas (e.g. "add more content") — be concrete about what to add and where.
+- Do not repeat ideas that already exist (see existingIdeasSummary in the bundle).
+- Prioritise high-impact, low-complexity opportunities where the evidence is clear.`;
+
 @Processor(IDEAS_QUEUE, { concurrency: 2 })
 export class IdeasProcessor extends WorkerHost {
   private readonly logger = new Logger(IdeasProcessor.name);
+  private anthropic: Anthropic | null = null;
   private openai: OpenAI | null = null;
 
   constructor(
@@ -88,9 +141,16 @@ export class IdeasProcessor extends WorkerHost {
     super();
   }
 
+  private getAnthropic(): Anthropic | null {
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key?.trim() || key.startsWith('sk-ant-...')) return null;
+    if (!this.anthropic) this.anthropic = new Anthropic({ apiKey: key });
+    return this.anthropic;
+  }
+
   private getOpenAI(): OpenAI | null {
     const key = process.env.OPENAI_API_KEY;
-    if (!key?.trim()) return null;
+    if (!key?.trim() || key === 'sk-...') return null;
     if (!this.openai) this.openai = new OpenAI({ apiKey: key });
     return this.openai;
   }
@@ -99,18 +159,16 @@ export class IdeasProcessor extends WorkerHost {
     const { orgId, siteId } = job.data;
 
     try {
-      const client = this.getOpenAI();
-      if (!client) {
-        this.logger.warn('OPENAI_API_KEY missing — ideas job skipped');
+      const anthropic = this.getAnthropic();
+      const openai = this.getOpenAI();
+
+      if (!anthropic && !openai) {
+        this.logger.warn('No AI key configured (ANTHROPIC_API_KEY or OPENAI_API_KEY) — ideas job skipped');
         return;
       }
 
-      this.events.emitJobUpdate(orgId, {
-        jobId: String(job.id),
-        siteId,
-        status: 'running',
-        progress: 5,
-      });
+      this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'running', progress: 5 });
+
       const site = await this.prisma.site.findUnique({
         where: { id: siteId },
         include: {
@@ -128,14 +186,16 @@ export class IdeasProcessor extends WorkerHost {
         where: { siteId },
         _count: { _all: true },
       });
-      const parts = statusCounts.map((r) => `${r._count._all} ${r.status}`);
-      const existingIdeasSummary = parts.length ? parts.join(', ') : 'none yet';
+      const existingIdeasSummary = statusCounts.length
+        ? statusCounts.map((r) => `${r._count._all} ${r.status}`).join(', ')
+        : 'none yet';
 
       const pages: ContextPage[] = site.pages.map((p) => {
         const meta = (p.meta && typeof p.meta === 'object' ? p.meta : {}) as Record<string, unknown>;
         const wc = typeof meta.wordCount === 'number' ? meta.wordCount : 0;
         const desc = typeof meta.description === 'string' ? meta.description : '';
-        const topicSummary = (desc || p.title || '').toString().slice(0, 240);
+        const h1 = typeof meta.h1 === 'string' ? meta.h1 : '';
+        const topicSummary = (h1 || desc || p.title || '').slice(0, 280);
         return {
           url: normalizeUrlPath(p.url),
           type: p.type,
@@ -154,59 +214,21 @@ export class IdeasProcessor extends WorkerHost {
         existingIdeasSummary,
       };
 
-      const system = `You are a senior agency strategist. You produce decision-ready website improvement ideas (pitch briefings).
-Return ONLY valid JSON with this exact shape:
-{
-  "ideas": [
-    {
-      "title": "string, max 8 words, action-oriented",
-      "pitchText": "string, 2-3 sentences, plain language for non-technical buyers, no markdown",
-      "cmsHint": "string or null, CMS-specific implementation hint",
-      "type": "blog_post|seo_fix|new_section|api_integration|feature|other",
-      "areas": ["content"|"seo"|"feature"|"ux"] (1-3 items),
-      "complexity": "low"|"medium"|"high",
-      "estimatedHours": number (realistic for the CMS),
-      "requiresDev": boolean,
-      "confidence": number 0-1,
-      "impactScore": number 0-1,
-      "reasoning": "short technical rationale",
-      "sourcePageUrls": ["paths from context pages.url, best evidence"]
-    }
-  ]
-}
-Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with existingIdeasSummary; each idea must cite at least one sourcePageUrls from the bundle pages.`;
+      let rawIdeas: RawIdea[];
 
-      const user = `Context bundle:\n${JSON.stringify(bundle)}`;
-
-      const completion = await client.chat.completions.create({
-        model: 'gpt-4o',
-        response_format: { type: 'json_object' },
-        temperature: 0.45,
-        max_tokens: 4500,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-      });
-
-      const text = completion.choices[0]?.message?.content || '{}';
-      let parsed: { ideas?: RawIdea[] };
-      try {
-        parsed = JSON.parse(text) as { ideas?: RawIdea[] };
-      } catch {
-        this.logger.warn('GPT returned non-JSON for ideas job');
-        return;
+      if (anthropic) {
+        rawIdeas = await this.generateWithClaude(anthropic, bundle);
+      } else {
+        rawIdeas = await this.generateWithOpenAI(openai!, bundle);
       }
 
-      const rawIdeas = Array.isArray(parsed.ideas) ? parsed.ideas.slice(0, MAX_IDEAS_PER_RUN) : [];
       const cms = site.cms as CmsType;
-
       let progress = 10;
       const step = Math.max(5, Math.floor(80 / Math.max(rawIdeas.length, 1)));
 
-      for (const raw of rawIdeas) {
+      for (const raw of rawIdeas.slice(0, MAX_IDEAS_PER_RUN)) {
         progress = Math.min(95, progress + step);
-        await this.persistOneIdea(client, orgId, siteId, cms, raw, site.pages, site.name);
+        await this.persistOneIdea(openai, orgId, siteId, cms, raw, site.pages, site.name);
         this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'running', progress });
       }
 
@@ -215,12 +237,7 @@ Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with exist
       const message = err instanceof Error ? err.message : String(err);
       const attempts = job.opts.attempts ?? 2;
       if (job.attemptsMade >= attempts) {
-        this.events.emitError(orgId, {
-          siteId,
-          type: 'ideas_error',
-          message,
-          retryable: true,
-        });
+        this.events.emitError(orgId, { siteId, type: 'ideas_error', message, retryable: true });
         this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'failed', progress: 0 });
       }
       throw err;
@@ -230,8 +247,75 @@ Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with exist
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Claude — tool_use gives reliable structured output without JSON mode
+  // ---------------------------------------------------------------------------
+  private async generateWithClaude(client: Anthropic, bundle: ContextBundle): Promise<RawIdea[]> {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system: SYSTEM_PROMPT,
+      tools: [
+        {
+          name: 'record_ideas',
+          description: `Record up to ${MAX_IDEAS_PER_RUN} website improvement ideas for the given site.`,
+          input_schema: IDEAS_RESPONSE_SCHEMA,
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'record_ideas' },
+      messages: [
+        {
+          role: 'user',
+          content: `Analyse this site context and record the most valuable improvement ideas.\n\nContext bundle:\n${JSON.stringify(bundle, null, 2)}`,
+        },
+      ],
+    });
+
+    const toolBlock = response.content.find((b) => b.type === 'tool_use');
+    if (toolBlock?.type !== 'tool_use') {
+      this.logger.warn('Claude did not call the record_ideas tool');
+      return [];
+    }
+
+    const input = toolBlock.input as { ideas?: RawIdea[] };
+    return Array.isArray(input.ideas) ? input.ideas : [];
+  }
+
+  // ---------------------------------------------------------------------------
+  // OpenAI GPT-4o fallback — kept for backwards compatibility
+  // ---------------------------------------------------------------------------
+  private async generateWithOpenAI(client: OpenAI, bundle: ContextBundle): Promise<RawIdea[]> {
+    const system = `${SYSTEM_PROMPT}
+Return ONLY valid JSON matching this schema:
+${JSON.stringify(IDEAS_RESPONSE_SCHEMA, null, 2)}
+Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with existingIdeasSummary; each idea must cite at least one sourcePageUrls from the bundle pages.`;
+
+    const completion = await client.chat.completions.create({
+      model: 'gpt-4o',
+      response_format: { type: 'json_object' },
+      temperature: 0.45,
+      max_tokens: 4500,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: `Context bundle:\n${JSON.stringify(bundle)}` },
+      ],
+    });
+
+    const text = completion.choices[0]?.message?.content || '{}';
+    try {
+      const parsed = JSON.parse(text) as { ideas?: RawIdea[] };
+      return Array.isArray(parsed.ideas) ? parsed.ideas : [];
+    } catch {
+      this.logger.warn('GPT-4o returned non-JSON for ideas job');
+      return [];
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Persist one idea (shared by both code paths)
+  // ---------------------------------------------------------------------------
   private async persistOneIdea(
-    client: OpenAI,
+    openaiClient: OpenAI | null,
     orgId: string,
     siteId: string,
     cms: CmsType,
@@ -266,85 +350,97 @@ Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with exist
     const cmsHint = (raw.cmsHint && String(raw.cmsHint).trim()) || null;
     const reasoning = (raw.reasoning && String(raw.reasoning).trim()) || null;
 
-    const embedText = `${title}\n${pitchText}`.slice(0, 8000);
-    const emb = await client.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: embedText,
-    });
-    const vector = emb.data[0]?.embedding;
-    if (!vector || vector.length !== 1536) return;
+    // Embeddings are OpenAI-only (Claude has no embeddings API); skip dedup if unavailable
+    if (openaiClient) {
+      const embedText = `${title}\n${pitchText}`.slice(0, 8000);
+      const emb = await openaiClient.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: embedText,
+      });
+      const vector = emb.data[0]?.embedding;
+      if (!vector || vector.length !== 1536) return;
 
-    const literal = `[${vector.join(',')}]`;
-    const dup = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
-      `SELECT id FROM ideas
-       WHERE site_id = $1::uuid
-       AND embedding IS NOT NULL
-       AND 1 - (embedding <=> $2::vector) > $3
-       LIMIT 1`,
-      siteId,
-      literal,
-      DEDUP_THRESHOLD,
-    );
-    if (dup.length > 0) return;
+      const literal = `[${vector.join(',')}]`;
+      const dup = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT id FROM ideas
+         WHERE site_id = $1::uuid
+         AND embedding IS NOT NULL
+         AND 1 - (embedding <=> $2::vector) > $3
+         LIMIT 1`,
+        siteId,
+        literal,
+        DEDUP_THRESHOLD,
+      );
+      if (dup.length > 0) return;
 
+      const sourceUrls: string[] = Array.isArray(raw.sourcePageUrls)
+        ? raw.sourcePageUrls.map((u) => String(u).trim()).filter(Boolean)
+        : [];
+
+      const matchedPageIds = this.matchSourcePages(sourceUrls, pages);
+
+      const idea = await this.prisma.idea.create({
+        data: {
+          siteId, title, pitchText,
+          description: reasoning, cmsHint, complexity,
+          estimatedHours: hours, requiresDev, areas,
+          confidence: conf, impactScore: impact, status: 'open',
+        },
+      });
+
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE ideas SET embedding = $1::vector WHERE id = $2::uuid`,
+        literal,
+        idea.id,
+      );
+
+      for (const pageId of matchedPageIds) {
+        await this.prisma.ideaSource.create({ data: { ideaId: idea.id, pageId } }).catch(() => undefined);
+      }
+
+      this.events.emitIdeaNew(orgId, { ideaId: idea.id, siteId, title: idea.title });
+      await this.notifier.notifyNewIdea({ ideaId: idea.id, siteId, title: idea.title, siteName });
+      return;
+    }
+
+    // No embedding available — persist without deduplication
     const sourceUrls: string[] = Array.isArray(raw.sourcePageUrls)
       ? raw.sourcePageUrls.map((u) => String(u).trim()).filter(Boolean)
       : [];
+    const matchedPageIds = this.matchSourcePages(sourceUrls, pages);
 
-    const matchedPageIds = new Set<string>();
+    const idea = await this.prisma.idea.create({
+      data: {
+        siteId, title, pitchText,
+        description: reasoning, cmsHint, complexity,
+        estimatedHours: hours, requiresDev, areas,
+        confidence: conf, impactScore: impact, status: 'open',
+      },
+    });
+
+    for (const pageId of matchedPageIds) {
+      await this.prisma.ideaSource.create({ data: { ideaId: idea.id, pageId } }).catch(() => undefined);
+    }
+
+    this.events.emitIdeaNew(orgId, { ideaId: idea.id, siteId, title: idea.title });
+    await this.notifier.notifyNewIdea({ ideaId: idea.id, siteId, title: idea.title, siteName });
+  }
+
+  private matchSourcePages(
+    sourceUrls: string[],
+    pages: { id: string; url: string }[],
+  ): Set<string> {
+    const matched = new Set<string>();
     for (const su of sourceUrls) {
       const norm = su.startsWith('http') ? normalizeUrlPath(su) : su;
       for (const p of pages) {
         const pPath = normalizeUrlPath(p.url);
         if (pPath === norm || p.url.endsWith(norm) || pPath.endsWith(norm)) {
-          matchedPageIds.add(p.id);
+          matched.add(p.id);
         }
       }
     }
-    if (matchedPageIds.size === 0 && pages[0]) {
-      matchedPageIds.add(pages[0].id);
-    }
-
-    const idea = await this.prisma.idea.create({
-      data: {
-        siteId,
-        title,
-        pitchText,
-        description: reasoning,
-        cmsHint,
-        complexity,
-        estimatedHours: hours,
-        requiresDev,
-        areas,
-        confidence: conf,
-        impactScore: impact,
-        status: 'open',
-      },
-    });
-
-    await this.prisma.$executeRawUnsafe(
-      `UPDATE ideas SET embedding = $1::vector WHERE id = $2::uuid`,
-      literal,
-      idea.id,
-    );
-
-    for (const pageId of matchedPageIds) {
-      await this.prisma.ideaSource.create({
-        data: { ideaId: idea.id, pageId },
-      }).catch(() => undefined);
-    }
-
-    this.events.emitIdeaNew(orgId, {
-      ideaId: idea.id,
-      siteId,
-      title: idea.title,
-    });
-
-    await this.notifier.notifyNewIdea({
-      ideaId: idea.id,
-      siteId,
-      title: idea.title,
-      siteName,
-    });
+    if (matched.size === 0 && pages[0]) matched.add(pages[0].id);
+    return matched;
   }
 }

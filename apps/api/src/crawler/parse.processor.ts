@@ -6,7 +6,7 @@ import type { PageType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events/events.gateway';
 import { PARSE_QUEUE, type ParsePageJob } from './parse.constants';
-import { extractFromHtml, cleanForMainText, mainBodyText, wordCount } from './html-parse';
+import { extractFromHtml, cleanForMainText, mainBodyText, wordCount, isPageMeaningful } from './html-parse';
 import { classifyPageAfterParse } from './page-classifier';
 import { QueueStatsEmitter } from './queue-stats.emitter';
 
@@ -64,7 +64,7 @@ export class ParseProcessor extends WorkerHost {
       };
 
       const client = this.getOpenAI();
-      if (client && bodyText.length > 0) {
+      if (client && isPageMeaningful(bodyText)) {
         const input = bodyText.slice(0, 8000);
         const emb = await client.embeddings.create({
           model: 'text-embedding-3-small',

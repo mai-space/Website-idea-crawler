@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { JobTrigger, PageType } from '@prisma/client';
@@ -7,6 +7,7 @@ import { EventsGateway } from '../events/events.gateway';
 import { CRAWL_QUEUE, type CrawlPageJob } from './crawl.constants';
 import { PARSE_QUEUE } from './parse.constants';
 import { IDEAS_QUEUE } from './ideas.constants';
+import { SitemapService } from './sitemap.service';
 
 export interface StartCrawlDto {
   depth?: number;
@@ -19,9 +20,12 @@ export interface StartCrawlOptions {
 
 @Injectable()
 export class CrawlerService {
+  private readonly logger = new Logger(CrawlerService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventsGateway,
+    private readonly sitemapService: SitemapService,
     @InjectQueue(CRAWL_QUEUE) private readonly crawlQueue: Queue,
     @InjectQueue(PARSE_QUEUE) private readonly parseQueue: Queue,
     @InjectQueue(IDEAS_QUEUE) private readonly ideasQueue: Queue,
@@ -49,23 +53,53 @@ export class CrawlerService {
 
     await this.prisma.site.update({ where: { id: siteId }, data: { status: 'crawling' } });
 
-    await this.crawlQueue.add(
-      'crawl:page',
-      {
-        siteId,
-        crawlJobId: crawlJob.id,
-        orgId,
-        url: site.url,
-        depth: 0,
-        maxDepth,
-        visitedUrls: [],
-      } satisfies CrawlPageJob,
-      {
-        priority: site.priority * 10 + 5,
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 1000 },
-      },
-    );
+    const maxPages = dto.maxPages ?? parseInt(process.env.CRAWLER_MAX_PAGES || '500');
+    const jobPriority = site.priority * 10 + 5;
+
+    // --- Sitemap-first strategy ---
+    // Try to get the full URL list from the site's sitemap before falling back to
+    // depth-first link following. This is dramatically faster for large sites.
+    const sitemapUrls = await this.sitemapService.discoverUrls(site.url, maxPages);
+
+    if (sitemapUrls.length > 0) {
+      this.logger.log(`Sitemap found ${sitemapUrls.length} URLs for site ${siteId}; skipping recursive crawl`);
+      await this.prisma.crawlJob.update({
+        where: { id: crawlJob.id },
+        data: { pagesTotal: sitemapUrls.length },
+      });
+
+      const jobs = sitemapUrls.map((url) => ({
+        name: 'crawl:page' as const,
+        data: {
+          siteId,
+          crawlJobId: crawlJob.id,
+          orgId,
+          url,
+          depth: 0,
+          maxDepth: 0, // no recursive link-following needed
+          visitedUrls: [],
+        } satisfies CrawlPageJob,
+        opts: { priority: jobPriority, attempts: 3, backoff: { type: 'exponential' as const, delay: 1000 } },
+      }));
+
+      // BullMQ bulk add is far more efficient than N individual .add() calls
+      await this.crawlQueue.addBulk(jobs);
+    } else {
+      // Fall back to the original depth-first recursive crawl
+      await this.crawlQueue.add(
+        'crawl:page',
+        {
+          siteId,
+          crawlJobId: crawlJob.id,
+          orgId,
+          url: site.url,
+          depth: 0,
+          maxDepth,
+          visitedUrls: [],
+        } satisfies CrawlPageJob,
+        { priority: jobPriority, attempts: 3, backoff: { type: 'exponential', delay: 1000 } },
+      );
+    }
 
     await this.prisma.crawlJob.update({ where: { id: crawlJob.id }, data: { status: 'running' } });
 

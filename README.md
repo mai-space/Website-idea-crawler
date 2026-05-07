@@ -64,6 +64,7 @@ curl -fsSL https://raw.githubusercontent.com/mai-space/Website-idea-crawler/main
 
 For secrets like `OPENAI_API_KEY`, prefer downloading the script first and then adding the key to `~/sitebrief/apps/api/.env`.
 Alternatively, export it in your shell before running the downloaded script instead of putting the secret directly into a curl-to-bash command.
+To expose the Vite dev server intentionally, set `SITEBRIEF_WEB_HOST=0.0.0.0` before running `sitebrief start`.
 
 ## Manual setup (API + web)
 
@@ -97,7 +98,7 @@ Edit `apps/api/.env` and set at least:
 
 ```bash
 npm run db:generate --workspace=apps/api
-npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+(cd apps/api && npm exec prisma migrate deploy)
 ```
 
 Optional seed data:

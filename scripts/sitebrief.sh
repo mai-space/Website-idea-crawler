@@ -3,11 +3,11 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+API_DIR="$PROJECT_ROOT/apps/api"
 STATE_DIR="${SITEBRIEF_STATE_DIR:-$PROJECT_ROOT/.sitebrief}"
-API_ENV_FILE="$PROJECT_ROOT/apps/api/.env"
+API_ENV_FILE="$API_DIR/.env"
 ENV_TEMPLATE="$PROJECT_ROOT/.env.example"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
-PRISMA_SCHEMA="$PROJECT_ROOT/apps/api/prisma/schema.prisma"
 API_PID_FILE="$STATE_DIR/api.pid"
 WEB_PID_FILE="$STATE_DIR/web.pid"
 API_LOG_FILE="$STATE_DIR/api.log"
@@ -75,6 +75,13 @@ docker_compose() {
 run_in_project() {
   (
     cd "$PROJECT_ROOT"
+    "$@"
+  )
+}
+
+run_in_api() {
+  (
+    cd "$API_DIR"
     "$@"
   )
 }
@@ -205,7 +212,7 @@ prepare_database() {
   run_in_project npm run db:generate --workspace=apps/api
 
   say 'Applying Prisma migrations'
-  run_in_project npx prisma migrate deploy --schema "$PRISMA_SCHEMA"
+  run_in_api npm exec prisma migrate deploy
 }
 
 is_pid_running() {
@@ -318,7 +325,11 @@ stop_process() {
 
 start_apps() {
   start_process 'API' "$API_PID_FILE" "$API_LOG_FILE" npm run dev --workspace=apps/api
-  start_process 'web dashboard' "$WEB_PID_FILE" "$WEB_LOG_FILE" npm run dev --workspace=apps/web -- --host 0.0.0.0
+  if [[ -n "${SITEBRIEF_WEB_HOST:-}" ]]; then
+    start_process 'web dashboard' "$WEB_PID_FILE" "$WEB_LOG_FILE" npm run dev --workspace=apps/web -- --host "$SITEBRIEF_WEB_HOST"
+  else
+    start_process 'web dashboard' "$WEB_PID_FILE" "$WEB_LOG_FILE" npm run dev --workspace=apps/web
+  fi
 
   say 'Frontend: http://localhost:5173'
   say 'API: http://localhost:3001'
@@ -331,7 +342,7 @@ stop_apps() {
 }
 
 install_command() {
-  require_commands bash git node npm
+  require_commands bash node npm
   require_docker_compose
   ensure_state_dir
   ensure_env_file
@@ -342,7 +353,7 @@ install_command() {
 }
 
 start_command() {
-  require_commands bash git node npm
+  require_commands bash node npm
   require_docker_compose
   ensure_state_dir
   ensure_env_file

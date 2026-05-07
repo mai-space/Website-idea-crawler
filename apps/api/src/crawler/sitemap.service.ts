@@ -112,16 +112,16 @@ export class SitemapService {
 
     // Regular sitemap — contains <url><loc>…</loc></url> entries
     const urls: string[] = [];
-    $('url > loc').each((_, el) => {
-      if (urls.length >= maxUrls) return false;
+    for (const el of $('url > loc').toArray()) {
+      if (urls.length >= maxUrls) break;
       const loc = $(el).text().trim();
-      if (!loc) return;
-      if (SKIPPED_EXTENSIONS.test(loc)) return;
+      if (!loc) continue;
+      if (SKIPPED_EXTENSIONS.test(loc)) continue;
       try {
         const u = new URL(loc);
         if (u.origin === origin) urls.push(loc);
       } catch {}
-    });
+    }
     return urls.slice(0, maxUrls);
   }
 }

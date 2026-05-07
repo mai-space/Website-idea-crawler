@@ -141,21 +141,94 @@ ensure_env_file() {
     say 'Created apps/api/.env from .env.example'
   fi
 
+  local current_jwt_secret
+  current_jwt_secret="$(get_env_value JWT_SECRET "$API_ENV_FILE")"
+  if [[ -z "$current_jwt_secret" || "$current_jwt_secret" == "$JWT_TEMPLATE_PLACEHOLDER" || "$current_jwt_secret" == "$JWT_DEV_PLACEHOLDER" ]]; then
+    upsert_env_var JWT_SECRET "$(generate_jwt_secret)" "$API_ENV_FILE"
+    say 'Generated a local JWT secret in apps/api/.env'
+  fi
+}
+
+apply_explicit_env_overrides() {
+  [[ "${SITEBRIEF_WRITE_API_ENV_OVERRIDES:-}" == '1' ]] || return 0
+
   [[ -n "${DATABASE_URL:-}" ]] && upsert_env_var DATABASE_URL "$DATABASE_URL" "$API_ENV_FILE"
   [[ -n "${REDIS_HOST:-}" ]] && upsert_env_var REDIS_HOST "$REDIS_HOST" "$API_ENV_FILE"
   [[ -n "${REDIS_PORT:-}" ]] && upsert_env_var REDIS_PORT "$REDIS_PORT" "$API_ENV_FILE"
   [[ -n "${FRONTEND_URL:-}" ]] && upsert_env_var FRONTEND_URL "$FRONTEND_URL" "$API_ENV_FILE"
   [[ -n "${PORT:-}" ]] && upsert_env_var PORT "$PORT" "$API_ENV_FILE"
   [[ -n "${OPENAI_API_KEY:-}" ]] && upsert_env_var OPENAI_API_KEY "$OPENAI_API_KEY" "$API_ENV_FILE"
+  [[ -n "${JWT_SECRET:-}" ]] && upsert_env_var JWT_SECRET "$JWT_SECRET" "$API_ENV_FILE"
+  return 0
+}
 
-  local current_jwt_secret
-  current_jwt_secret="$(get_env_value JWT_SECRET "$API_ENV_FILE")"
-  if [[ -n "${JWT_SECRET:-}" ]]; then
-    upsert_env_var JWT_SECRET "$JWT_SECRET" "$API_ENV_FILE"
-  elif [[ -z "$current_jwt_secret" || "$current_jwt_secret" == "$JWT_TEMPLATE_PLACEHOLDER" || "$current_jwt_secret" == "$JWT_DEV_PLACEHOLDER" ]]; then
-    upsert_env_var JWT_SECRET "$(generate_jwt_secret)" "$API_ENV_FILE"
-    say 'Generated a local JWT secret in apps/api/.env'
-  fi
+load_api_env() {
+  [[ -f "$API_ENV_FILE" ]] || fail "Missing API env file: $API_ENV_FILE"
+
+  while IFS= read -r -d '' entry; do
+    export "$entry"
+  done < <(
+    node - "$API_ENV_FILE" <<'NODE'
+const fs = require('node:fs');
+const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const envFile = process.argv[2];
+const content = fs.readFileSync(envFile, 'utf8');
+
+function parseEnvFile(source) {
+  const env = {};
+
+  for (const rawLine of source.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+
+    const line = trimmed.startsWith('export ') ? trimmed.slice(7) : trimmed;
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    let value = line.slice(separatorIndex + 1).trim();
+
+    if (!ENV_VAR_NAME_PATTERN.test(key)) {
+      continue;
+    }
+
+    if (value.startsWith('"') || value.startsWith("'")) {
+      const quote = value[0];
+      if (value.length < 2 || !value.endsWith(quote)) {
+        continue;
+      }
+      value = value.slice(1, -1);
+      if (quote === '"') {
+        value = value
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, '\\');
+      }
+    } else {
+      const commentIndex = value.search(/\s#/);
+      if (commentIndex !== -1) {
+        value = value.slice(0, commentIndex).trimEnd();
+      }
+    }
+
+    env[key] = value;
+  }
+
+  return env;
+}
+
+for (const [key, value] of Object.entries(parseEnvFile(content))) {
+  process.stdout.write(`${key}=${value}\0`);
+}
+NODE
+  )
 }
 
 warn_for_optional_env() {
@@ -346,7 +419,9 @@ install_command() {
   require_docker_compose
   ensure_state_dir
   ensure_env_file
+  apply_explicit_env_overrides
   install_dependencies
+  load_api_env
   start_infra
   prepare_database
   start_apps
@@ -357,7 +432,9 @@ start_command() {
   require_docker_compose
   ensure_state_dir
   ensure_env_file
+  apply_explicit_env_overrides
   ensure_dependencies
+  load_api_env
   start_infra
   prepare_database
   start_apps

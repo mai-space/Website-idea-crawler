@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/mai-space/Website-idea-crawler/main
 ```
 
 For secrets like `OPENAI_API_KEY`, prefer downloading the script first and then adding the key to `~/sitebrief/apps/api/.env`.
-Alternatively, export it in your shell before running the downloaded script instead of putting the secret directly into a curl-to-bash command.
+Managed `sitebrief install` / `sitebrief start` runs treat `apps/api/.env` as the source of truth; shell variables do not rewrite that file unless you explicitly opt in with `SITEBRIEF_WRITE_API_ENV_OVERRIDES=1`.
 To expose the Vite dev server intentionally, set `SITEBRIEF_WEB_HOST=0.0.0.0` before running `sitebrief start`.
 
 ## Manual setup (API + web)

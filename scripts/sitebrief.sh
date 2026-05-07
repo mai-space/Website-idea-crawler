@@ -110,7 +110,7 @@ const { URL } = require('node:url');
 
 try {
   const databaseUrl = new URL(process.env.DATABASE_URL || '');
-  const databaseName = databaseUrl.pathname.replace(/^\/+/, '').split('/')[0];
+  const databaseName = databaseUrl.pathname.replace(/^\/+/, '');
   const port = databaseUrl.port || '5432';
   process.stdout.write([databaseUrl.protocol, decodeURIComponent(databaseUrl.username), databaseUrl.hostname, port, databaseName].join('\t'));
 } catch {

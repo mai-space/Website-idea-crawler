@@ -158,6 +158,71 @@ ensure_env_file() {
   fi
 }
 
+load_api_env() {
+  [[ -f "$API_ENV_FILE" ]] || fail "Missing API env file: $API_ENV_FILE"
+
+  while IFS= read -r -d '' entry; do
+    export "$entry"
+  done < <(
+    node - "$API_ENV_FILE" <<'NODE'
+const fs = require('node:fs');
+
+const envFile = process.argv[2];
+const content = fs.readFileSync(envFile, 'utf8');
+
+function parseEnvFile(source) {
+  const env = {};
+
+  for (const rawLine of source.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+
+    const line = trimmed.startsWith('export ') ? trimmed.slice(7) : trimmed;
+    const separatorIndex = line.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = line.slice(0, separatorIndex).trim();
+    let value = line.slice(separatorIndex + 1).trim();
+
+    if (!key) {
+      continue;
+    }
+
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      const quote = value[0];
+      value = value.slice(1, -1);
+      if (quote === '"') {
+        value = value
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, '\\');
+      }
+    } else {
+      const commentIndex = value.search(/\s#/);
+      if (commentIndex !== -1) {
+        value = value.slice(0, commentIndex).trimEnd();
+      }
+    }
+
+    env[key] = value;
+  }
+
+  return env;
+}
+
+for (const [key, value] of Object.entries(parseEnvFile(content))) {
+  process.stdout.write(`${key}=${value}\0`);
+}
+NODE
+  )
+}
+
 warn_for_optional_env() {
   local openai_key
   openai_key="$(get_env_value OPENAI_API_KEY "$API_ENV_FILE")"
@@ -347,6 +412,7 @@ install_command() {
   ensure_state_dir
   ensure_env_file
   install_dependencies
+  load_api_env
   start_infra
   prepare_database
   start_apps
@@ -358,6 +424,7 @@ start_command() {
   ensure_state_dir
   ensure_env_file
   ensure_dependencies
+  load_api_env
   start_infra
   prepare_database
   start_apps

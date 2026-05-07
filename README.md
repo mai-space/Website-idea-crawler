@@ -54,11 +54,13 @@ If `~/.local/bin` is not on your `PATH`, run the script directly instead:
 
 ### Optional environment overrides
 
-You can preconfigure the installer in the same one-liner:
+You can still override non-secret settings without editing the script first:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mai-space/Website-idea-crawler/main/install.sh | SITEBRIEF_INSTALL_DIR=$HOME/sitebrief OPENAI_API_KEY=sk-... bash
+curl -fsSL https://raw.githubusercontent.com/mai-space/Website-idea-crawler/main/install.sh | SITEBRIEF_INSTALL_DIR=$HOME/sitebrief bash
 ```
+
+For secrets like `OPENAI_API_KEY`, prefer downloading the script first and then adding the key to `~/sitebrief/apps/api/.env` (or exporting it in your shell before running the downloaded script) instead of putting the secret directly into a curl-to-bash command.
 
 ## Manual setup (API + web)
 

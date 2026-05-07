@@ -11,6 +11,8 @@ API_PID_FILE="$STATE_DIR/api.pid"
 WEB_PID_FILE="$STATE_DIR/web.pid"
 API_LOG_FILE="$STATE_DIR/api.log"
 WEB_LOG_FILE="$STATE_DIR/web.log"
+JWT_TEMPLATE_SECRET='change-me-in-production-min-32-chars'
+JWT_DEV_SECRET='dev-secret-change-in-production'
 
 say() {
   printf '[sitebrief] %s\n' "$*"
@@ -140,7 +142,7 @@ ensure_env_file() {
   current_jwt_secret="$(get_env_value JWT_SECRET "$API_ENV_FILE")"
   if [[ -n "${JWT_SECRET:-}" ]]; then
     upsert_env_var JWT_SECRET "$JWT_SECRET" "$API_ENV_FILE"
-  elif [[ -z "$current_jwt_secret" || "$current_jwt_secret" == 'change-me-in-production-min-32-chars' || "$current_jwt_secret" == 'dev-secret-change-in-production' ]]; then
+  elif [[ -z "$current_jwt_secret" || "$current_jwt_secret" == "$JWT_TEMPLATE_SECRET" || "$current_jwt_secret" == "$JWT_DEV_SECRET" ]]; then
     upsert_env_var JWT_SECRET "$(generate_jwt_secret)" "$API_ENV_FILE"
     say 'Generated a local JWT secret in apps/api/.env'
   fi
@@ -226,7 +228,8 @@ start_process() {
   local label="$1"
   local pid_file="$2"
   local log_file="$3"
-  local command_text="$4"
+  shift 3
+  local command_args=("$@")
 
   if is_pid_running "$pid_file"; then
     say "$label is already running (pid $(cat "$pid_file"))"
@@ -236,7 +239,7 @@ start_process() {
   : > "$log_file"
   (
     cd "$PROJECT_ROOT"
-    nohup bash -lc "exec $command_text" >> "$log_file" 2>&1 &
+    nohup "${command_args[@]}" >> "$log_file" 2>&1 &
     echo $! > "$pid_file"
   )
 
@@ -253,7 +256,7 @@ stop_process() {
   local label="$1"
   local pid_file="$2"
   local pid
-  local waited
+  local attempt
 
   if ! is_pid_running "$pid_file"; then
     say "$label is not running"
@@ -263,7 +266,7 @@ stop_process() {
   pid="$(cat "$pid_file")"
   kill "$pid" 2>/dev/null || true
 
-  for waited in $(seq 1 20); do
+  for attempt in $(seq 1 20); do
     if ! kill -0 "$pid" 2>/dev/null; then
       rm -f "$pid_file"
       say "Stopped $label"
@@ -278,8 +281,8 @@ stop_process() {
 }
 
 start_apps() {
-  start_process 'API' "$API_PID_FILE" "$API_LOG_FILE" 'npm run dev --workspace=apps/api'
-  start_process 'web dashboard' "$WEB_PID_FILE" "$WEB_LOG_FILE" 'npm run dev --workspace=apps/web -- --host 0.0.0.0'
+  start_process 'API' "$API_PID_FILE" "$API_LOG_FILE" npm run dev --workspace=apps/api
+  start_process 'web dashboard' "$WEB_PID_FILE" "$WEB_LOG_FILE" npm run dev --workspace=apps/web -- --host 0.0.0.0
 
   say 'Frontend: http://localhost:5173'
   say 'API: http://localhost:3001'

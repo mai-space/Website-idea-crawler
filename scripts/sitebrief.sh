@@ -16,6 +16,9 @@ JWT_TEMPLATE_PLACEHOLDER='change-me-in-production-min-32-chars'
 JWT_DEV_PLACEHOLDER='dev-secret-change-in-production'
 PROCESS_START_WAIT_SECONDS=3
 PROCESS_STOP_MAX_ATTEMPTS=20
+# Keep this scoped to the concrete fresh-local bootstrap failures we can recover from.
+# A generic P3018 can also represent real migration errors on non-empty databases and
+# must not trigger the `db push --accept-data-loss` fallback.
 PRISMA_LOCAL_BOOTSTRAP_FALLBACK_PATTERN='P1010|relation "[^"]+" does not exist|type "vector" does not exist'
 
 say() {

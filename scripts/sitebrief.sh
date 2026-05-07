@@ -170,6 +170,7 @@ load_api_env() {
   done < <(
     node - "$API_ENV_FILE" <<'NODE'
 const fs = require('node:fs');
+const ENV_VAR_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const envFile = process.argv[2];
 const content = fs.readFileSync(envFile, 'utf8');
@@ -192,13 +193,13 @@ function parseEnvFile(source) {
     const key = line.slice(0, separatorIndex).trim();
     let value = line.slice(separatorIndex + 1).trim();
 
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    if (!ENV_VAR_NAME_PATTERN.test(key)) {
       continue;
     }
 
     if (value.startsWith('"') || value.startsWith("'")) {
       const quote = value[0];
-      if (!value.endsWith(quote) || value.length === 1) {
+      if (value.length < 2 || !value.endsWith(quote)) {
         continue;
       }
       value = value.slice(1, -1);

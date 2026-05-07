@@ -23,6 +23,8 @@ cd Website-idea-crawler
 curl -fsSL https://raw.githubusercontent.com/mai-space/Website-idea-crawler/main/install.sh | bash
 ```
 
+If you want to review the installer first, download `install.sh`, inspect it, and then run it locally.
+
 This will:
 
 - clone the repository into `~/sitebrief` (override with `SITEBRIEF_INSTALL_DIR`)

@@ -7,12 +7,13 @@ STATE_DIR="${SITEBRIEF_STATE_DIR:-$PROJECT_ROOT/.sitebrief}"
 API_ENV_FILE="$PROJECT_ROOT/apps/api/.env"
 ENV_TEMPLATE="$PROJECT_ROOT/.env.example"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
+PRISMA_SCHEMA="$PROJECT_ROOT/apps/api/prisma/schema.prisma"
 API_PID_FILE="$STATE_DIR/api.pid"
 WEB_PID_FILE="$STATE_DIR/web.pid"
 API_LOG_FILE="$STATE_DIR/api.log"
 WEB_LOG_FILE="$STATE_DIR/web.log"
-JWT_TEMPLATE_SECRET='change-me-in-production-min-32-chars'
-JWT_DEV_SECRET='dev-secret-change-in-production'
+JWT_TEMPLATE_PLACEHOLDER='change-me-in-production-min-32-chars'
+JWT_DEV_PLACEHOLDER='dev-secret-change-in-production'
 PROCESS_START_WAIT_SECONDS=3
 PROCESS_STOP_MAX_ATTEMPTS=20
 
@@ -90,7 +91,7 @@ get_env_value() {
     return 0
   fi
 
-  grep -E "^${key}=" "$file" | tail -n 1 | cut -d'=' -f2- || true
+  awk -v key="$key" 'index($0, key "=") == 1 { print substr($0, length(key) + 2) }' "$file" | tail -n 1 || true
 }
 
 upsert_env_var() {
@@ -144,7 +145,7 @@ ensure_env_file() {
   current_jwt_secret="$(get_env_value JWT_SECRET "$API_ENV_FILE")"
   if [[ -n "${JWT_SECRET:-}" ]]; then
     upsert_env_var JWT_SECRET "$JWT_SECRET" "$API_ENV_FILE"
-  elif [[ -z "$current_jwt_secret" || "$current_jwt_secret" == "$JWT_TEMPLATE_SECRET" || "$current_jwt_secret" == "$JWT_DEV_SECRET" ]]; then
+  elif [[ -z "$current_jwt_secret" || "$current_jwt_secret" == "$JWT_TEMPLATE_PLACEHOLDER" || "$current_jwt_secret" == "$JWT_DEV_PLACEHOLDER" ]]; then
     upsert_env_var JWT_SECRET "$(generate_jwt_secret)" "$API_ENV_FILE"
     say 'Generated a local JWT secret in apps/api/.env'
   fi
@@ -204,7 +205,7 @@ prepare_database() {
   run_in_project npm run db:generate --workspace=apps/api
 
   say 'Applying Prisma migrations'
-  run_in_project npx prisma migrate deploy --schema apps/api/prisma/schema.prisma
+  run_in_project npx prisma migrate deploy --schema "$PRISMA_SCHEMA"
 }
 
 is_pid_running() {
@@ -241,7 +242,11 @@ start_process() {
   : > "$log_file"
   (
     cd "$PROJECT_ROOT"
-    nohup "${command_args[@]}" >> "$log_file" 2>&1 &
+    if command_exists setsid; then
+      setsid "${command_args[@]}" >> "$log_file" 2>&1 < /dev/null &
+    else
+      nohup "${command_args[@]}" >> "$log_file" 2>&1 < /dev/null &
+    fi
     echo $! > "$pid_file"
   )
 
@@ -254,10 +259,17 @@ start_process() {
   say "Started $label (pid $(cat "$pid_file")); log: $log_file"
 }
 
+get_process_group_id() {
+  local pid="$1"
+
+  ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]'
+}
+
 stop_process() {
   local label="$1"
   local pid_file="$2"
   local pid
+  local group_id
   local attempt
 
   if ! is_pid_running "$pid_file"; then
@@ -266,10 +278,21 @@ stop_process() {
   fi
 
   pid="$(cat "$pid_file")"
-  kill "$pid" 2>/dev/null || true
+  group_id="$(get_process_group_id "$pid")"
+  if [[ -n "$group_id" && "$group_id" == "$pid" ]]; then
+    kill -- "-$group_id" 2>/dev/null || true
+  else
+    kill "$pid" 2>/dev/null || true
+  fi
 
   for attempt in $(seq 1 "$PROCESS_STOP_MAX_ATTEMPTS"); do
-    if ! kill -0 "$pid" 2>/dev/null; then
+    if [[ -n "$group_id" && "$group_id" == "$pid" ]]; then
+      if ! kill -0 "-$group_id" 2>/dev/null; then
+        rm -f "$pid_file"
+        say "Stopped $label"
+        return 0
+      fi
+    elif ! kill -0 "$pid" 2>/dev/null; then
       rm -f "$pid_file"
       say "Stopped $label"
       return 0
@@ -277,7 +300,11 @@ stop_process() {
     sleep 1
   done
 
-  kill -9 "$pid" 2>/dev/null || true
+  if [[ -n "$group_id" && "$group_id" == "$pid" ]]; then
+    kill -9 -- "-$group_id" 2>/dev/null || true
+  else
+    kill -9 "$pid" 2>/dev/null || true
+  fi
   rm -f "$pid_file"
   say "Force-stopped $label"
 }

@@ -75,7 +75,9 @@ WRAPPER
 
 run_installed_tool() {
   local command="$1"
-  shift || true
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
   local target_script="$SITEBRIEF_INSTALL_DIR/scripts/sitebrief.sh"
 
   [[ -x "$target_script" ]] || fail "Install is incomplete. Run install first."
@@ -84,7 +86,9 @@ run_installed_tool() {
 
 main() {
   local command="${1:-install}"
-  shift || true
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
 
   case "$command" in
     install)

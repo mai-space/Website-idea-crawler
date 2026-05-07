@@ -214,7 +214,7 @@ is_pid_running() {
 
   [[ -f "$pid_file" ]] || return 1
   pid="$(cat "$pid_file")"
-  [[ "$pid" =~ ^[0-9]+$ ]] || {
+  is_numeric_pid "$pid" || {
     rm -f "$pid_file"
     return 1
   }
@@ -225,6 +225,12 @@ is_pid_running() {
 
   rm -f "$pid_file"
   return 1
+}
+
+is_numeric_pid() {
+  local pid="$1"
+
+  [[ "$pid" =~ ^[0-9]+$ ]]
 }
 
 start_process() {
@@ -270,7 +276,7 @@ stop_process() {
   local pid_file="$2"
   local pid
   local group_id
-  local attempt
+  local attempt=0
 
   if ! is_pid_running "$pid_file"; then
     say "$label is not running"
@@ -285,7 +291,7 @@ stop_process() {
     kill "$pid" 2>/dev/null || true
   fi
 
-  for attempt in $(seq 1 "$PROCESS_STOP_MAX_ATTEMPTS"); do
+  while (( attempt < PROCESS_STOP_MAX_ATTEMPTS )); do
     if [[ -n "$group_id" && "$group_id" == "$pid" ]]; then
       if ! kill -0 "-$group_id" 2>/dev/null; then
         rm -f "$pid_file"
@@ -297,6 +303,7 @@ stop_process() {
       say "Stopped $label"
       return 0
     fi
+    ((attempt += 1))
     sleep 1
   done
 
@@ -366,7 +373,11 @@ update_command() {
   require_docker_compose
 
   local branch_name
-  branch_name="${SITEBRIEF_BRANCH:-$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD)}"
+  if [[ -n "${SITEBRIEF_BRANCH:-}" ]]; then
+    branch_name="$SITEBRIEF_BRANCH"
+  else
+    branch_name="$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD)" || fail 'Unable to detect the current git branch for update'
+  fi
   [[ "$branch_name" != 'HEAD' ]] || fail 'Cannot update from a detached HEAD checkout'
 
   stop_apps

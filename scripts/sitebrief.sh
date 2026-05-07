@@ -13,6 +13,8 @@ API_LOG_FILE="$STATE_DIR/api.log"
 WEB_LOG_FILE="$STATE_DIR/web.log"
 JWT_TEMPLATE_SECRET='change-me-in-production-min-32-chars'
 JWT_DEV_SECRET='dev-secret-change-in-production'
+PROCESS_START_WAIT_SECONDS=3
+PROCESS_STOP_MAX_ATTEMPTS=20
 
 say() {
   printf '[sitebrief] %s\n' "$*"
@@ -243,7 +245,7 @@ start_process() {
     echo $! > "$pid_file"
   )
 
-  sleep 3
+  sleep "$PROCESS_START_WAIT_SECONDS"
   if ! is_pid_running "$pid_file"; then
     tail -n 20 "$log_file" || true
     fail "$label failed to start. Check $log_file"
@@ -266,7 +268,7 @@ stop_process() {
   pid="$(cat "$pid_file")"
   kill "$pid" 2>/dev/null || true
 
-  for attempt in $(seq 1 20); do
+  for attempt in $(seq 1 "$PROCESS_STOP_MAX_ATTEMPTS"); do
     if ! kill -0 "$pid" 2>/dev/null; then
       rm -f "$pid_file"
       say "Stopped $label"

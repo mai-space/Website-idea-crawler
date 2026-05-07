@@ -179,7 +179,7 @@ npm run build --workspace=apps/web
 - **Network errors on `/api`:** Ensure the API is listening on **3001** (`PORT` in `apps/api/.env`). The Vite proxy in `apps/web/vite.config.ts` targets `http://localhost:3001`.
 - **WebSocket issues:** Socket.IO is proxied at `/socket.io`; use the same origin as the Vite app (**5173**).
 - **Port already in use:** Change `PORT` for the API or `server.port` in `apps/web/vite.config.ts`, and update the proxy `target` if you change the API port.
-- **`P1010` or other local Prisma bootstrap errors:** If you are reusing an older local Docker volume, reset the local Postgres/Redis data from the repo root with `docker compose down -v`, then rerun `sitebrief install` or `sitebrief start`.
+- **`P1010` or other local Prisma bootstrap errors:** `sitebrief install` / `sitebrief start` now retries the local schema repair through the Docker Postgres container, but a heavily reused or incompatible local Docker volume may still need `docker compose down -v` from the repo root before rerunning the command.
 
 ## Repository layout
 

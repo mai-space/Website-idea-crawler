@@ -96,6 +96,29 @@ run_prisma_db_execute() {
   printf '%s\n' "$sql" | run_in_api npm exec prisma db execute -- --stdin --schema prisma/schema.prisma
 }
 
+get_local_postgres_container_id() {
+  local postgres_container_id
+  postgres_container_id="$(docker_compose ps -q postgres 2>/dev/null || true)"
+  [[ -n "$postgres_container_id" ]] || return 1
+  printf '%s\n' "$postgres_container_id"
+}
+
+run_local_postgres_sql_as_sitebrief() {
+  local postgres_container_id="$1"
+  local sql="$2"
+
+  printf '%s\n' "$sql" | docker exec -i "$postgres_container_id" \
+    psql -v ON_ERROR_STOP=1 -U sitebrief -d sitebrief
+}
+
+run_local_postgres_sql_as_postgres() {
+  local postgres_container_id="$1"
+  local sql="$2"
+
+  printf '%s\n' "$sql" | docker exec -i -u postgres "$postgres_container_id" \
+    psql -v ON_ERROR_STOP=1 -d sitebrief
+}
+
 is_default_local_database_url() {
   local parsed_database_url
   local protocol
@@ -323,10 +346,20 @@ start_infra() {
 }
 
 prepare_local_postgres_access() {
+  local postgres_container_id
   local sql
+  local repair_sql
   read -r -d '' sql <<'SQL' || true
 GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;
 ALTER SCHEMA public OWNER TO CURRENT_USER;
+CREATE EXTENSION IF NOT EXISTS vector;
+SQL
+
+  read -r -d '' repair_sql <<'SQL' || true
+GRANT ALL PRIVILEGES ON DATABASE sitebrief TO sitebrief;
+ALTER DATABASE sitebrief OWNER TO sitebrief;
+GRANT USAGE, CREATE ON SCHEMA public TO sitebrief;
+ALTER SCHEMA public OWNER TO sitebrief;
 CREATE EXTENSION IF NOT EXISTS vector;
 SQL
 
@@ -334,6 +367,19 @@ SQL
 
   say 'Preparing PostgreSQL schema access'
   if run_prisma_db_execute "$sql"; then
+    return 0
+  fi
+
+  postgres_container_id="$(get_local_postgres_container_id)" || {
+    warn 'Unable to identify the local PostgreSQL container for direct schema repair.'
+    return 1
+  }
+
+  if run_local_postgres_sql_as_sitebrief "$postgres_container_id" "$sql"; then
+    return 0
+  fi
+
+  if run_local_postgres_sql_as_postgres "$postgres_container_id" "$repair_sql"; then
     return 0
   fi
 
@@ -351,11 +397,10 @@ is_safe_local_db_push_fallback() {
     return 1
   fi
 
-  postgres_container_id="$(docker_compose ps -q postgres 2>/dev/null || true)"
-  if [[ -z "$postgres_container_id" ]]; then
+  postgres_container_id="$(get_local_postgres_container_id)" || {
     warn 'Skipping Prisma db push fallback because the local PostgreSQL container could not be identified.'
     return 1
-  fi
+  }
 
   read -r -d '' table_check_sql <<'SQL' || true
 SELECT CASE

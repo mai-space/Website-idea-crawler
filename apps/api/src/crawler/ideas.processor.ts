@@ -47,6 +47,18 @@ const IDEA_ITEM_SCHEMA = {
   required: ['title', 'pitchText', 'type', 'areas', 'complexity', 'estimatedHours', 'requiresDev', 'confidence'],
 } as const;
 
+const IDEAS_RESPONSE_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    ideas: {
+      type: 'array',
+      items: IDEA_ITEM_SCHEMA,
+      maxItems: MAX_IDEAS_PER_RUN,
+    },
+  },
+  required: ['ideas'],
+} as const;
+
 interface ContextPage {
   url: string;
   type: string;
@@ -247,17 +259,7 @@ export class IdeasProcessor extends WorkerHost {
         {
           name: 'record_ideas',
           description: `Record up to ${MAX_IDEAS_PER_RUN} website improvement ideas for the given site.`,
-          input_schema: {
-            type: 'object' as const,
-            properties: {
-              ideas: {
-                type: 'array',
-                items: IDEA_ITEM_SCHEMA,
-                maxItems: MAX_IDEAS_PER_RUN,
-              },
-            },
-            required: ['ideas'],
-          },
+          input_schema: IDEAS_RESPONSE_SCHEMA,
         },
       ],
       tool_choice: { type: 'tool', name: 'record_ideas' },
@@ -283,26 +285,9 @@ export class IdeasProcessor extends WorkerHost {
   // OpenAI GPT-4o fallback — kept for backwards compatibility
   // ---------------------------------------------------------------------------
   private async generateWithOpenAI(client: OpenAI, bundle: ContextBundle): Promise<RawIdea[]> {
-    const system = `You are a senior agency strategist. You produce decision-ready website improvement ideas (pitch briefings).
-Return ONLY valid JSON with this exact shape:
-{
-  "ideas": [
-    {
-      "title": "string, max 8 words, action-oriented",
-      "pitchText": "string, 2-3 sentences, plain language for non-technical buyers, no markdown",
-      "cmsHint": "string or null, CMS-specific implementation hint",
-      "type": "blog_post|seo_fix|new_section|api_integration|feature|other",
-      "areas": ["content"|"seo"|"feature"|"ux"] (1-3 items),
-      "complexity": "low"|"medium"|"high",
-      "estimatedHours": number (realistic for the CMS),
-      "requiresDev": boolean,
-      "confidence": number 0-1,
-      "impactScore": number 0-1,
-      "reasoning": "short technical rationale",
-      "sourcePageUrls": ["paths from context pages.url, best evidence"]
-    }
-  ]
-}
+    const system = `${SYSTEM_PROMPT}
+Return ONLY valid JSON matching this schema:
+${JSON.stringify(IDEAS_RESPONSE_SCHEMA, null, 2)}
 Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with existingIdeasSummary; each idea must cite at least one sourcePageUrls from the bundle pages.`;
 
     const completion = await client.chat.completions.create({

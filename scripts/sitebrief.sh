@@ -633,8 +633,9 @@ stop_process() {
 }
 
 start_apps() {
+  local api_port="${PORT:-3001}"
   start_process 'API' "$API_PID_FILE" "$API_LOG_FILE" npm run dev --workspace=apps/api
-  if ! wait_for_port 'API' "${PORT:-3001}" "$API_PID_FILE"; then
+  if ! wait_for_port 'API' "$api_port" "$API_PID_FILE"; then
     say 'Last 40 lines of API log:'
     tail -n 40 "$API_LOG_FILE" || true
     fail 'API did not become ready in time. Fix any errors above and run: sitebrief restart'
@@ -652,7 +653,7 @@ start_apps() {
   fi
 
   say 'Frontend: http://localhost:5173'
-  say 'API: http://localhost:3001'
+  say "API: http://localhost:${api_port}"
   warn_for_optional_env
 }
 

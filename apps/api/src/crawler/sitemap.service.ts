@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { gunzipSync } from 'node:zlib';
 
 const USER_AGENT = 'Sitebrief/2.0 (+https://sitebrief.dev)';
 const MAX_SITEMAP_DEPTH = 2;
@@ -25,7 +26,7 @@ export class SitemapService {
     const seen = new Set<string>();
 
     for (const candidate of candidates.slice(0, 5)) {
-      const urls = await this.parseSitemap(candidate, origin, 0);
+      const urls = await this.parseSitemap(candidate, origin, 0, maxUrls);
       for (const u of urls) {
         seen.add(u);
         if (seen.size >= maxUrls) break;
@@ -67,17 +68,25 @@ export class SitemapService {
     }
   }
 
-  private async parseSitemap(url: string, origin: string, depth: number): Promise<string[]> {
+  private async parseSitemap(url: string, origin: string, depth: number, maxUrls: number): Promise<string[]> {
     if (depth > MAX_SITEMAP_DEPTH) return [];
 
     let xml: string;
     try {
-      const { data } = await axios.get<string>(url, {
+      const { data, headers } = await axios.get<ArrayBuffer>(url, {
         timeout: this.timeoutMs,
         headers: { 'User-Agent': USER_AGENT },
-        responseType: 'text',
+        responseType: 'arraybuffer',
       });
-      xml = data as string;
+      const contentType = String(headers['content-type'] ?? '').toLowerCase();
+      const contentEncoding = String(headers['content-encoding'] ?? '').toLowerCase();
+      const gzipped =
+        url.toLowerCase().endsWith('.gz') ||
+        contentType.includes('application/gzip') ||
+        contentType.includes('application/x-gzip') ||
+        contentEncoding.includes('gzip');
+      const body = Buffer.from(data);
+      xml = gzipped ? gunzipSync(body).toString('utf8') : body.toString('utf8');
     } catch (err: unknown) {
       this.logger.debug(`Sitemap fetch failed for ${url}: ${err instanceof Error ? err.message : String(err)}`);
       return [];
@@ -87,21 +96,24 @@ export class SitemapService {
 
     // Sitemap index — contains <sitemap><loc>…</loc></sitemap> entries
     const childSitemaps: string[] = [];
-    $('sitemap > loc').each((_, el) => childSitemaps.push($(el).text().trim()));
+    $('sitemap > loc').each((_, el) => {
+      childSitemaps.push($(el).text().trim());
+    });
 
     if (childSitemaps.length > 0) {
       const urls: string[] = [];
       for (const child of childSitemaps.slice(0, 20)) {
-        const sub = await this.parseSitemap(child, origin, depth + 1);
+        const sub = await this.parseSitemap(child, origin, depth + 1, maxUrls);
         urls.push(...sub);
-        if (urls.length >= MAX_URLS_PER_SITEMAP) break;
+        if (urls.length >= maxUrls) break;
       }
-      return urls;
+      return urls.slice(0, maxUrls);
     }
 
     // Regular sitemap — contains <url><loc>…</loc></url> entries
     const urls: string[] = [];
     $('url > loc').each((_, el) => {
+      if (urls.length >= maxUrls) return false;
       const loc = $(el).text().trim();
       if (!loc) return;
       if (SKIPPED_EXTENSIONS.test(loc)) return;
@@ -110,6 +122,6 @@ export class SitemapService {
         if (u.origin === origin) urls.push(loc);
       } catch {}
     });
-    return urls;
+    return urls.slice(0, maxUrls);
   }
 }

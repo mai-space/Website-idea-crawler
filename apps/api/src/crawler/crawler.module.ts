@@ -16,6 +16,7 @@ import { IdeasService } from './ideas.service';
 import { IdeasController } from './ideas.controller';
 import { CrawlSchedulerService } from './crawl-scheduler.service';
 import { NotifierService } from '../notifications/notifier.service';
+import { SitemapService } from './sitemap.service';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { NotifierService } from '../notifications/notifier.service';
     NotifierService,
     RateLimiterService,
     QueueStatsEmitter,
+    SitemapService,
   ],
   controllers: [CrawlerController, IdeasController],
   exports: [CrawlerService, IdeasService],

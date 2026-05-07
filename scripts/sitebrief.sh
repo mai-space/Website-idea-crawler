@@ -14,8 +14,9 @@ API_LOG_FILE="$STATE_DIR/api.log"
 WEB_LOG_FILE="$STATE_DIR/web.log"
 JWT_TEMPLATE_PLACEHOLDER='change-me-in-production-min-32-chars'
 JWT_DEV_PLACEHOLDER='dev-secret-change-in-production'
-PROCESS_START_WAIT_SECONDS=3
+PROCESS_START_WAIT_SECONDS=5
 PROCESS_STOP_MAX_ATTEMPTS=20
+PROCESS_READY_TIMEOUT_SECONDS=90
 # Keep this scoped to the concrete fresh-local bootstrap failures we can recover from.
 # A generic P3018 can also represent real migration errors on non-empty databases and
 # must not trigger the `db push --accept-data-loss` fallback.
@@ -70,6 +71,52 @@ require_commands() {
 require_docker_compose() {
   command_exists docker || fail 'Missing prerequisite: docker'
   docker compose version >/dev/null 2>&1 || fail 'Missing prerequisite: docker compose plugin'
+}
+
+check_node_version() {
+  local version major
+  version="$(node -e 'process.stdout.write(process.versions.node)' 2>/dev/null)" \
+    || fail 'node is not working correctly'
+  major="${version%%.*}"
+  if (( major < 18 )); then
+    fail "Node.js 18 or later is required (found: v${version}). Please upgrade Node.js."
+  fi
+  say "Node.js v${version} detected"
+}
+
+is_port_open() {
+  local host="$1"
+  local port="$2"
+  # /dev/tcp is a bash built-in — safe because this script requires bash
+  (echo > "/dev/tcp/$host/$port") 2>/dev/null && return 0
+  # fallback: nc
+  if command_exists nc; then
+    nc -z -w 1 "$host" "$port" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+wait_for_port() {
+  local label="$1"
+  local port="$2"
+  local pid_file="$3"
+  local timeout_seconds="${4:-$PROCESS_READY_TIMEOUT_SECONDS}"
+  local deadline=$(( SECONDS + timeout_seconds ))
+
+  say "Waiting for $label to be ready on port $port (up to ${timeout_seconds}s)..."
+  while (( SECONDS < deadline )); do
+    if ! is_pid_running "$pid_file"; then
+      warn "$label process exited before becoming ready"
+      return 1
+    fi
+    if is_port_open 127.0.0.1 "$port"; then
+      say "$label is ready"
+      return 0
+    fi
+    sleep 2
+  done
+  warn "$label did not open port $port within ${timeout_seconds}s"
+  return 1
 }
 
 docker_compose() {
@@ -587,10 +634,21 @@ stop_process() {
 
 start_apps() {
   start_process 'API' "$API_PID_FILE" "$API_LOG_FILE" npm run dev --workspace=apps/api
+  if ! wait_for_port 'API' "${PORT:-3001}" "$API_PID_FILE"; then
+    say 'Last 40 lines of API log:'
+    tail -n 40 "$API_LOG_FILE" || true
+    fail 'API did not become ready in time. Fix any errors above and run: sitebrief restart'
+  fi
+
   if [[ -n "${SITEBRIEF_WEB_HOST:-}" ]]; then
     start_process 'web dashboard' "$WEB_PID_FILE" "$WEB_LOG_FILE" npm run dev --workspace=apps/web -- --host "$SITEBRIEF_WEB_HOST"
   else
     start_process 'web dashboard' "$WEB_PID_FILE" "$WEB_LOG_FILE" npm run dev --workspace=apps/web
+  fi
+  if ! wait_for_port 'web dashboard' 5173 "$WEB_PID_FILE" 60; then
+    say 'Last 40 lines of web log:'
+    tail -n 40 "$WEB_LOG_FILE" || true
+    fail 'Web dashboard did not become ready in time. Fix any errors above and run: sitebrief restart'
   fi
 
   say 'Frontend: http://localhost:5173'
@@ -606,6 +664,7 @@ stop_apps() {
 install_command() {
   require_commands bash node npm
   require_docker_compose
+  check_node_version
   ensure_state_dir
   ensure_env_file
   apply_explicit_env_overrides
@@ -619,6 +678,7 @@ install_command() {
 start_command() {
   require_commands bash node npm
   require_docker_compose
+  check_node_version
   ensure_state_dir
   ensure_env_file
   apply_explicit_env_overrides

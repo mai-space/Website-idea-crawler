@@ -32,31 +32,63 @@ export function extractFromHtml(html: string): { $: cheerio.CheerioAPI; meta: Ex
   };
 }
 
-const CLASS_NOISE = /\b(menu|sidebar|cookie|banner|footer-nav|header-nav|navigation)\b/i;
+// Structural noise: layout chrome, third-party widgets, consent layers, etc.
+const STRUCTURAL_SELECTORS = [
+  'nav', 'header', 'footer', 'aside',
+  'script', 'style', 'noscript', 'template',
+  'svg', 'canvas', 'picture > source',
+].join(', ');
+
+const ARIA_NOISE_ROLES = new Set([
+  'navigation', 'banner', 'contentinfo', 'complementary',
+  'search', 'dialog', 'alertdialog',
+]);
+
+// Class / id fragments that reliably indicate non-content regions
+const CLASS_NOISE =
+  /\b(menu|sidebar|cookie|banner|footer-nav|header-nav|navigation|breadcrumb|topbar|toolbar|widget|popup|modal|overlay|chat|intercom|drift|hubspot|livechat|gdpr|consent|newsletter-modal|skip-link|back-to-top|social-share|sharing|pagination|pager|related-posts|tag-cloud|author-bio|comment-form|comments-area)\b/i;
 
 export function cleanForMainText($: cheerio.CheerioAPI): cheerio.CheerioAPI {
   const root = cheerio.load($.root().html() ?? '');
-  root('nav, header, footer, aside, script, style, noscript').remove();
-  root('[role="navigation"], [role="banner"], [role="contentinfo"]').remove();
 
+  // Remove structural noise
+  root(STRUCTURAL_SELECTORS).remove();
+  root(`[role]`).each((_, el) => {
+    const role = root(el).attr('role') || '';
+    if (ARIA_NOISE_ROLES.has(role)) root(el).remove();
+  });
+
+  // Remove class/id-based noise
   root('*').each((_, el) => {
     const node = root(el);
-    const cls = node.attr('class') || '';
-    const id = node.attr('id') || '';
-    if (CLASS_NOISE.test(cls) || CLASS_NOISE.test(id)) node.remove();
+    const cls = (node.attr('class') || '') + ' ' + (node.attr('id') || '');
+    if (CLASS_NOISE.test(cls)) node.remove();
   });
+
+  // Remove hidden elements that may carry invisible text
+  root('[style*="display:none"], [style*="display: none"], [hidden]').remove();
+  root('[aria-hidden="true"]').remove();
 
   return root;
 }
 
 export function mainBodyText(cleaned: cheerio.CheerioAPI): string {
-  const main = cleaned('main, article, [role="main"]').first();
+  const main = cleaned('main, article, [role="main"], .content, .post-content, .entry-content, #content').first();
   const scope = main.length ? main : cleaned('body');
-  const text = scope.text().replace(/\s+/g, ' ').trim();
-  return text;
+  return scope
+    .text()
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function wordCount(text: string): number {
   if (!text) return 0;
   return text.split(/\s+/).filter(Boolean).length;
+}
+
+/** Pages with fewer words than this threshold carry little AI signal. */
+export const MIN_MEANINGFUL_WORDS = 80;
+
+export function isPageMeaningful(text: string): boolean {
+  return wordCount(text) >= MIN_MEANINGFUL_WORDS;
 }

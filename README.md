@@ -94,11 +94,12 @@ Edit `apps/api/.env` and set at least:
 - `JWT_SECRET` — use a long random string (32+ characters) in any real environment
 - `OPENAI_API_KEY` — required for embeddings and idea generation features
 
-### 4. Generate Prisma client and apply database migrations
+### 4. Generate Prisma client and bootstrap the local database schema
 
 ```bash
 npm run db:generate --workspace=apps/api
-(cd apps/api && npm exec prisma migrate deploy)
+(cd apps/api && printf 'GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;\nALTER SCHEMA public OWNER TO CURRENT_USER;\nCREATE EXTENSION IF NOT EXISTS vector;\n' | npm exec prisma db execute -- --stdin --schema prisma/schema.prisma)
+(cd apps/api && npm exec prisma db push -- --accept-data-loss)
 ```
 
 Optional seed data:
@@ -167,6 +168,7 @@ npm run build --workspace=apps/web
 - **Network errors on `/api`:** Ensure the API is listening on **3001** (`PORT` in `apps/api/.env`). The Vite proxy in `apps/web/vite.config.ts` targets `http://localhost:3001`.
 - **WebSocket issues:** Socket.IO is proxied at `/socket.io`; use the same origin as the Vite app (**5173**).
 - **Port already in use:** Change `PORT` for the API or `server.port` in `apps/web/vite.config.ts`, and update the proxy `target` if you change the API port.
+- **`P1010` or other local Prisma bootstrap errors:** If you are reusing an older local Docker volume, reset the local Postgres/Redis data from the repo root with `docker compose down -v`, then rerun `sitebrief install` or `sitebrief start`.
 
 ## Repository layout
 

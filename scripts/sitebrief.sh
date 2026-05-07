@@ -86,6 +86,12 @@ run_in_api() {
   )
 }
 
+run_prisma_db_execute() {
+  local sql="$1"
+
+  printf '%s\n' "$sql" | run_in_api npm exec prisma db execute -- --stdin --schema prisma/schema.prisma
+}
+
 ensure_state_dir() {
   mkdir -p "$STATE_DIR"
 }
@@ -280,12 +286,53 @@ start_infra() {
   wait_for_service redis 90
 }
 
+prepare_local_postgres_access() {
+  say 'Preparing PostgreSQL schema access'
+  if run_prisma_db_execute $'GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;\nALTER SCHEMA public OWNER TO CURRENT_USER;\nCREATE EXTENSION IF NOT EXISTS vector;'; then
+    return 0
+  fi
+
+  warn 'Unable to normalize PostgreSQL schema access automatically. If this is a reused local Docker volume, run `docker compose down -v` from the project root and rerun the command.'
+  return 1
+}
+
+try_prisma_migrate_deploy() {
+  local output_file
+  output_file="$(mktemp)"
+
+  if run_in_api npm exec prisma migrate deploy 2>&1 | tee "$output_file"; then
+    rm -f "$output_file"
+    return 0
+  fi
+
+  if grep -Eq 'P1010|P3018|relation "[^"]+" does not exist|type "vector" does not exist' "$output_file"; then
+    rm -f "$output_file"
+    return 2
+  fi
+
+  rm -f "$output_file"
+  return 1
+}
+
 prepare_database() {
   say 'Generating Prisma client'
   run_in_project npm run db:generate --workspace=apps/api
 
+  prepare_local_postgres_access || true
+
   say 'Applying Prisma migrations'
-  run_in_api npm exec prisma migrate deploy
+  if try_prisma_migrate_deploy; then
+    return 0
+  else
+    local migrate_status=$?
+  fi
+  if [[ "$migrate_status" -ne 2 ]]; then
+    return "$migrate_status"
+  fi
+
+  warn 'Prisma migrate deploy could not initialize the local database; syncing the schema with Prisma db push instead.'
+  prepare_local_postgres_access || true
+  run_in_api npm exec prisma db push -- --accept-data-loss
 }
 
 is_pid_running() {

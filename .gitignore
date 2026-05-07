@@ -6,3 +6,4 @@ dist
 prisma/generated
 *.tsbuildinfo
 .claude/settings.local.json
+.sitebrief/

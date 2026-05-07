@@ -15,7 +15,58 @@ cd Website-idea-crawler
 - **npm** (workspaces are used at the repo root)
 - **Docker** (recommended) for PostgreSQL with **pgvector** and **Redis** — or provide your own instances matching `DATABASE_URL` / Redis in `apps/api/.env`
 
-## Quick start (API + web)
+## Quick start (one-line installer)
+
+### One-line install + startup
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mai-space/Website-idea-crawler/main/install.sh | bash
+```
+
+If you want to review the installer first, download `install.sh`, inspect it, and then run it locally.
+
+This will:
+
+- clone the repository into `~/sitebrief` (override with `SITEBRIEF_INSTALL_DIR`)
+- install the npm workspaces
+- create `apps/api/.env` from `.env.example` if needed
+- generate a local `JWT_SECRET` automatically
+- start PostgreSQL + Redis with Docker Compose
+- generate the Prisma client, apply migrations, and start the API + web dashboard
+- install a `sitebrief` wrapper in `~/.local/bin` (override with `SITEBRIEF_BIN_DIR`)
+
+If a prerequisite is missing, the script stops and tells you what to install first.
+If `OPENAI_API_KEY` is not configured, the app still starts, but embeddings and idea generation stay disabled until you add the key to `apps/api/.env`.
+
+### Service commands
+
+```bash
+sitebrief start
+sitebrief stop
+sitebrief restart
+sitebrief update
+sitebrief status
+```
+
+If `~/.local/bin` is not on your `PATH`, run the script directly instead:
+
+```bash
+~/sitebrief/scripts/sitebrief.sh start
+```
+
+### Optional environment overrides
+
+You can still override non-secret settings without editing the script first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mai-space/Website-idea-crawler/main/install.sh | SITEBRIEF_INSTALL_DIR=$HOME/sitebrief bash
+```
+
+For secrets like `OPENAI_API_KEY`, prefer downloading the script first and then adding the key to `~/sitebrief/apps/api/.env`.
+Alternatively, export it in your shell before running the downloaded script instead of putting the secret directly into a curl-to-bash command.
+To expose the Vite dev server intentionally, set `SITEBRIEF_WEB_HOST=0.0.0.0` before running `sitebrief start`.
+
+## Manual setup (API + web)
 
 ### 1. Start Postgres and Redis
 
@@ -43,10 +94,11 @@ Edit `apps/api/.env` and set at least:
 - `JWT_SECRET` — use a long random string (32+ characters) in any real environment
 - `OPENAI_API_KEY` — required for embeddings and idea generation features
 
-### 4. Apply database migrations
+### 4. Generate Prisma client and apply database migrations
 
 ```bash
-npm run db:migrate
+npm run db:generate --workspace=apps/api
+(cd apps/api && npm exec prisma migrate deploy)
 ```
 
 Optional seed data:

@@ -94,11 +94,23 @@ Edit `apps/api/.env` and set at least:
 - `JWT_SECRET` — use a long random string (32+ characters) in any real environment
 - `OPENAI_API_KEY` — required for embeddings and idea generation features
 
-### 4. Generate Prisma client and apply database migrations
+### 4. Generate Prisma client and bootstrap the local database schema
+
+For a brand-new database created by the default local Docker Compose setup, use `db push` after enabling the `vector` extension. The checked-in migrations cover incremental updates, so `prisma migrate deploy` is still best reserved for environments that already have Prisma migration history.
+
+If you are using an external or managed Postgres instance instead of the bundled Docker Postgres, do not assume the `ALTER SCHEMA` / `CREATE EXTENSION` statements below will work there. Use the permissions and extension workflow required by your provider, or skip those commands if the database is already prepared.
+
+Only run the final `db push --accept-data-loss` command against an empty local development database.
 
 ```bash
 npm run db:generate --workspace=apps/api
-(cd apps/api && npm exec prisma migrate deploy)
+(cd apps/api && cat <<'SQL' | npm exec prisma db execute -- --stdin --schema prisma/schema.prisma
+GRANT USAGE, CREATE ON SCHEMA public TO CURRENT_USER;
+ALTER SCHEMA public OWNER TO CURRENT_USER;
+CREATE EXTENSION IF NOT EXISTS vector;
+SQL
+)
+(cd apps/api && npm exec prisma db push -- --accept-data-loss)
 ```
 
 Optional seed data:
@@ -167,6 +179,7 @@ npm run build --workspace=apps/web
 - **Network errors on `/api`:** Ensure the API is listening on **3001** (`PORT` in `apps/api/.env`). The Vite proxy in `apps/web/vite.config.ts` targets `http://localhost:3001`.
 - **WebSocket issues:** Socket.IO is proxied at `/socket.io`; use the same origin as the Vite app (**5173**).
 - **Port already in use:** Change `PORT` for the API or `server.port` in `apps/web/vite.config.ts`, and update the proxy `target` if you change the API port.
+- **`P1010` or other local Prisma bootstrap errors:** If you are reusing an older local Docker volume, reset the local Postgres/Redis data from the repo root with `docker compose down -v`, then rerun `sitebrief install` or `sitebrief start`.
 
 ## Repository layout
 

@@ -488,11 +488,11 @@ try_prisma_migrate_deploy() {
   # P3009: one or more previous migration attempts left a failed record in the database.
   # On the default local Docker database, resolve each failed entry and retry once.
   if grep -q 'P3009' "$output_file" && is_default_local_database_url; then
-    local failed_names p
-    p='The `([^`]+)` migration'
+    local failed_names migration_name_pattern
+    migration_name_pattern='The `([^`]+)` migration'
     failed_names="$(
       while IFS= read -r line; do
-        if [[ "$line" =~ $p ]]; then
+        if [[ "$line" =~ $migration_name_pattern ]]; then
           printf '%s\n' "${BASH_REMATCH[1]}"
         fi
       done < "$output_file"

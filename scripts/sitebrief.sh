@@ -486,17 +486,28 @@ try_prisma_migrate_deploy() {
   fi
 
   # P3009: one or more previous migration attempts left a failed record in the database.
-  # On the default local Docker database, resolve each failed entry and retry once.
+  # On the default local Docker database, query _prisma_migrations directly for failed rows
+  # (more robust than parsing Prisma's human-readable error text which can change across
+  # versions) and resolve each one, then retry once. The retry output is also captured so
+  # that bootstrap-fallback patterns are still detectable on the second attempt.
   if grep -q 'P3009' "$output_file" && is_default_local_database_url; then
-    local failed_names migration_name_pattern
-    migration_name_pattern='The `([^`]+)` migration'
+    local postgres_container_id
+    postgres_container_id="$(get_local_postgres_container_id)" || {
+      warn 'Unable to identify the local PostgreSQL container; cannot resolve P3009 automatically.'
+      rm -f "$output_file"
+      return 1
+    }
+    local failed_names
     failed_names="$(
-      while IFS= read -r line; do
-        if [[ "$line" =~ $migration_name_pattern ]]; then
-          printf '%s\n' "${BASH_REMATCH[1]}"
-        fi
-      done < "$output_file"
-    )"
+      docker exec "$postgres_container_id" \
+        psql -U sitebrief -d sitebrief -tAc \
+        "SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL AND started_at IS NOT NULL;" \
+        2>/dev/null | tr -d ' '
+    )" || {
+      warn 'Unable to query _prisma_migrations for failed entries; cannot auto-resolve P3009.'
+      rm -f "$output_file"
+      return 1
+    }
     if [[ -n "$failed_names" ]]; then
       rm -f "$output_file"
       local migration_name
@@ -508,11 +519,16 @@ try_prisma_migrate_deploy() {
           return 1
         }
       done <<< "$failed_names"
+      # Capture the retry output so that bootstrap-fallback patterns are still detectable.
       say 'Re-applying Prisma migrations after resolving failed entries'
-      if run_in_api npm exec prisma migrate deploy; then
+      output_file="$(mktemp)"
+      if run_in_api npm exec prisma migrate deploy 2>&1 | tee "$output_file"; then
+        rm -f "$output_file"
         return 0
       fi
-      return 1
+      # Fall through to the bootstrap-pattern check on the retry output below.
+    else
+      warn 'P3009 detected but no failed migrations found in _prisma_migrations; cannot auto-resolve.'
     fi
   fi
 

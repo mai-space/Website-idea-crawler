@@ -502,7 +502,7 @@ try_prisma_migrate_deploy() {
       docker exec "$postgres_container_id" \
         psql -U sitebrief -d sitebrief -tAc \
         "SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL AND started_at IS NOT NULL;" \
-        2>/dev/null | tr -d ' '
+        2>/dev/null | tr -d '\r'
     )" || {
       warn 'Unable to query _prisma_migrations for failed entries; cannot auto-resolve P3009.'
       rm -f "$output_file"
@@ -529,6 +529,8 @@ try_prisma_migrate_deploy() {
       # Fall through to the bootstrap-pattern check on the retry output below.
     else
       warn 'P3009 detected but no failed migrations found in _prisma_migrations; cannot auto-resolve.'
+      rm -f "$output_file"
+      return 1
     fi
   fi
 

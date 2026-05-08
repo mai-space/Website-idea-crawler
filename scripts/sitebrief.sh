@@ -485,6 +485,37 @@ try_prisma_migrate_deploy() {
     return 0
   fi
 
+  # P3009: one or more previous migration attempts left a failed record in the database.
+  # On the default local Docker database, resolve each failed entry and retry once.
+  if grep -q 'P3009' "$output_file" && is_default_local_database_url; then
+    local failed_names p
+    p='The `([^`]+)` migration'
+    failed_names="$(
+      while IFS= read -r line; do
+        if [[ "$line" =~ $p ]]; then
+          printf '%s\n' "${BASH_REMATCH[1]}"
+        fi
+      done < "$output_file"
+    )"
+    if [[ -n "$failed_names" ]]; then
+      rm -f "$output_file"
+      local migration_name
+      while IFS= read -r migration_name; do
+        [[ -n "$migration_name" ]] || continue
+        say "Marking failed migration as rolled back: $migration_name"
+        run_in_api npm exec prisma migrate resolve -- --rolled-back "$migration_name" || {
+          warn "Unable to resolve failed migration: $migration_name"
+          return 1
+        }
+      done <<< "$failed_names"
+      say 'Re-applying Prisma migrations after resolving failed entries'
+      if run_in_api npm exec prisma migrate deploy; then
+        return 0
+      fi
+      return 1
+    fi
+  fi
+
   if grep -Eq "$PRISMA_LOCAL_BOOTSTRAP_FALLBACK_PATTERN" "$output_file"; then
     rm -f "$output_file"
     return 2

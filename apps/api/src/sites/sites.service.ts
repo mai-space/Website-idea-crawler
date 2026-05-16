@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
@@ -6,9 +6,12 @@ import { computeNextCrawlAt, isValidCronExpression } from '../crawler/cron.util'
 
 @Injectable()
 export class SitesService {
+  private readonly logger = new Logger(SitesService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   list(orgId: string) {
+    this.logger.debug(`Listing sites for org ${orgId}`);
     return this.prisma.site.findMany({
       where: { orgId },
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
@@ -36,10 +39,12 @@ export class SitesService {
     return site;
   }
 
-  create(orgId: string, dto: CreateSiteDto) {
-    return this.prisma.site.create({
+  async create(orgId: string, dto: CreateSiteDto) {
+    const site = await this.prisma.site.create({
       data: { orgId, ...dto },
     });
+    this.logger.log(`Site created: ${site.id} (${site.url}) for org ${orgId}`);
+    return site;
   }
 
   async update(orgId: string, id: string, dto: UpdateSiteDto) {
@@ -55,13 +60,15 @@ export class SitesService {
         if (!cron) throw new BadRequestException('scheduleCron is required when scheduleEnabled is true');
         if (!isValidCronExpression(cron)) throw new BadRequestException('Invalid scheduleCron expression');
         nextCrawlAt = computeNextCrawlAt(cron, new Date());
+        this.logger.debug(`Site ${id} schedule updated — next crawl at ${nextCrawlAt.toISOString()}`);
       } else {
         nextCrawlAt = null;
+        this.logger.debug(`Site ${id} schedule disabled`);
       }
     }
 
     const { scheduleEnabled, scheduleCron, ...rest } = dto;
-    return this.prisma.site.update({
+    const updated = await this.prisma.site.update({
       where: { id },
       data: {
         ...rest,
@@ -70,11 +77,15 @@ export class SitesService {
         ...(nextCrawlAt !== undefined ? { nextCrawlAt } : {}),
       },
     });
+    this.logger.log(`Site ${id} updated for org ${orgId}`);
+    return updated;
   }
 
   async remove(orgId: string, id: string) {
     await this.assertOwnership(orgId, id);
-    return this.prisma.site.delete({ where: { id } });
+    const deleted = await this.prisma.site.delete({ where: { id } });
+    this.logger.log(`Site ${id} deleted for org ${orgId}`);
+    return deleted;
   }
 
   private async assertOwnership(orgId: string, id: string) {

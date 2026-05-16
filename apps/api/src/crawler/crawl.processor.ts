@@ -34,10 +34,23 @@ export class CrawlProcessor extends WorkerHost {
     const { siteId, crawlJobId, orgId, url, depth, maxDepth } = job.data;
 
     const crawlJob = await this.prisma.crawlJob.findUnique({ where: { id: crawlJobId } });
-    if (!crawlJob || crawlJob.status === 'stopped' || crawlJob.status === 'failed') return;
-    if (crawlJob.pagesCrawled >= this.maxPages) return;
+    if (!crawlJob || crawlJob.status === 'stopped' || crawlJob.status === 'failed') {
+      this.logger.debug(`Skipping page ${url} — crawl job ${crawlJobId} is not active`);
+      return;
+    }
+    if (crawlJob.pagesCrawled >= this.maxPages) {
+      this.logger.debug(`Skipping page ${url} — max pages (${this.maxPages}) reached for job ${crawlJobId}`);
+      return;
+    }
 
-    const domain = new URL(url).hostname;
+    let domain: string;
+    try {
+      domain = new URL(url).hostname;
+    } catch (err: unknown) {
+      this.logger.warn(`Invalid URL in crawl job ${crawlJobId}: "${url}" — ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
     await this.rateLimiter.acquire(domain);
 
     let html: string;
@@ -70,6 +83,8 @@ export class CrawlProcessor extends WorkerHost {
       description: $('meta[name="description"]').attr('content') || null,
     } as object;
 
+    this.logger.debug(`Processing page ${url} (type=${pageType}, hash=${contentHash.slice(0, 8)}…)`);
+
     const existing = await this.prisma.page.findUnique({
       where: { siteId_url: { siteId, url } },
     });
@@ -78,6 +93,7 @@ export class CrawlProcessor extends WorkerHost {
     let needsParse = true;
 
     if (existing?.contentHash === contentHash && existing.parsedAt) {
+      this.logger.debug(`Page ${url} unchanged (content hash matches) — skipping parse`);
       await this.prisma.page.update({
         where: { id: existing.id },
         data: {
@@ -90,7 +106,12 @@ export class CrawlProcessor extends WorkerHost {
       pageId = existing.id;
       needsParse = false;
     } else if (existing) {
-      await this.prisma.$executeRawUnsafe(`UPDATE pages SET embedding = NULL WHERE id = $1::uuid`, existing.id);
+      this.logger.debug(`Page ${url} content changed — clearing embedding and re-queuing parse`);
+      try {
+        await this.prisma.$executeRawUnsafe(`UPDATE pages SET embedding = NULL WHERE id = $1::uuid`, existing.id);
+      } catch (err: unknown) {
+        this.logger.warn(`Failed to clear embedding for page ${existing.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
       const updated = await this.prisma.page.update({
         where: { id: existing.id },
         data: {
@@ -106,6 +127,7 @@ export class CrawlProcessor extends WorkerHost {
       pageId = updated.id;
       needsParse = true;
     } else {
+      this.logger.debug(`New page discovered: ${url}`);
       const created = await this.prisma.page.create({
         data: {
           siteId,
@@ -152,7 +174,13 @@ export class CrawlProcessor extends WorkerHost {
     }
 
     if (depth < maxDepth && updated.pagesCrawled < this.maxPages) {
-      const baseUrl = new URL(url);
+      let baseUrl: URL;
+      try {
+        baseUrl = new URL(url);
+      } catch {
+        this.logger.warn(`Cannot follow links from invalid URL: ${url}`);
+        return;
+      }
       const links: string[] = [];
 
       $('a[href]').each((_, el) => {
@@ -167,6 +195,7 @@ export class CrawlProcessor extends WorkerHost {
 
       const uniqueLinks = [...new Set(links)].slice(0, 50);
       if (uniqueLinks.length > 0) {
+        this.logger.debug(`Found ${uniqueLinks.length} followable links on ${url} (depth ${depth}/${maxDepth})`);
         await this.prisma.crawlJob.update({
           where: { id: crawlJobId },
           data: { pagesTotal: { increment: uniqueLinks.length } },
@@ -191,6 +220,7 @@ export class CrawlProcessor extends WorkerHost {
     }
 
     if (updated.pagesCrawled >= updated.pagesTotal && updated.pagesTotal > 0) {
+      this.logger.log(`Crawl job ${crawlJobId} completed: ${updated.pagesCrawled}/${updated.pagesTotal} pages for site ${siteId}`);
       await this.prisma.crawlJob.update({
         where: { id: crawlJobId },
         data: { status: 'done', finishedAt: new Date() },

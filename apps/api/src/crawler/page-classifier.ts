@@ -2,7 +2,13 @@ import * as cheerio from 'cheerio';
 import type { PageType } from '@prisma/client';
 
 export function classifyPageFromCrawl(url: string, $: cheerio.CheerioAPI): PageType {
-  return classifyPageCore(new URL(url).pathname.toLowerCase(), {
+  let pathname = '/';
+  try {
+    pathname = new URL(url).pathname.toLowerCase();
+  } catch {
+    // Malformed URL — treat as root
+  }
+  return classifyPageCore(pathname, {
     h1: $('h1').first().text().toLowerCase(),
     bodySample: '',
   });
@@ -13,7 +19,12 @@ export function classifyPageAfterParse(
   $: cheerio.CheerioAPI,
   bodyText: string,
 ): PageType {
-  const path = new URL(url).pathname.toLowerCase();
+  let path = '/';
+  try {
+    path = new URL(url).pathname.toLowerCase();
+  } catch {
+    // Malformed URL — treat as root
+  }
   const sample = bodyText.slice(0, 4000).toLowerCase();
   return classifyPageCore(path, {
     h1: $('h1').first().text().toLowerCase(),

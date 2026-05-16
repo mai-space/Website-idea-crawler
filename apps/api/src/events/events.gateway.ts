@@ -5,6 +5,7 @@ import {
   OnGatewayDisconnect,
   SubscribeMessage,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 
 @WebSocketGateway({
@@ -12,17 +13,30 @@ import { Server, Socket } from 'socket.io';
 })
 export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
+  private readonly logger = new Logger(EventsGateway.name);
 
   handleConnection(client: Socket) {
     const orgId = client.handshake.query.orgId as string;
-    if (orgId) client.join(`org:${orgId}`);
+    if (orgId) {
+      client.join(`org:${orgId}`);
+      this.logger.debug(`Client ${client.id} connected and joined org:${orgId}`);
+    } else {
+      this.logger.warn(`Client ${client.id} connected without orgId — not joined to any room`);
+    }
   }
 
-  handleDisconnect(_client: Socket) {}
+  handleDisconnect(client: Socket) {
+    this.logger.debug(`Client ${client.id} disconnected`);
+  }
 
   @SubscribeMessage('subscribe:site')
   handleSubscribeSite(client: Socket, siteId: string) {
+    if (!siteId) {
+      this.logger.warn(`Client ${client.id} tried to subscribe to a site without providing siteId`);
+      return;
+    }
     client.join(`site:${siteId}`);
+    this.logger.debug(`Client ${client.id} subscribed to site:${siteId}`);
   }
 
   emitJobUpdate(orgId: string, payload: { jobId: string; siteId: string; status: string; progress: number }) {
@@ -38,6 +52,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   emitError(orgId: string, payload: { siteId: string; type: string; message: string; retryable: boolean }) {
+    this.logger.warn(`Emitting error event to org ${orgId}: [${payload.type}] ${payload.message} (retryable=${payload.retryable})`);
     this.server.to(`org:${orgId}`).emit('error.new', payload);
   }
 

@@ -9,9 +9,12 @@ export class NotifierService {
     const slackUrl = process.env.SLACK_WEBHOOK_URL?.trim();
     const hookUrl = process.env.NOTIFY_WEBHOOK_URL?.trim();
 
-    for (const url of [slackUrl, hookUrl].filter(Boolean) as string[]) {
+    const webhooks = [slackUrl, hookUrl].filter(Boolean) as string[];
+    if (webhooks.length === 0) return;
+
+    for (const url of webhooks) {
       try {
-        await fetch(url, {
+        const res = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -22,8 +25,13 @@ export class NotifierService {
             siteName: payload.siteName,
           }),
         });
+        if (!res.ok) {
+          this.logger.warn(`Webhook notify returned HTTP ${res.status} for URL ${url}`);
+        } else {
+          this.logger.debug(`Webhook notify succeeded for URL ${url}`);
+        }
       } catch (e) {
-        this.logger.warn(`Webhook notify failed: ${e instanceof Error ? e.message : String(e)}`);
+        this.logger.warn(`Webhook notify failed for URL ${url}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   }

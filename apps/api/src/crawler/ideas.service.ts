@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -17,6 +18,8 @@ import type { BulkIdeasDto } from './dto/bulk-ideas.dto';
 
 @Injectable()
 export class IdeasService {
+  private readonly logger = new Logger(IdeasService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(IDEAS_QUEUE) private readonly ideasQueue: Queue,
@@ -25,8 +28,8 @@ export class IdeasService {
   ) {}
 
   async enqueueGenerate(orgId: string, siteId: string) {
-    if (!process.env.OPENAI_API_KEY?.trim()) {
-      throw new BadRequestException('OPENAI_API_KEY is required for idea generation');
+    if (!process.env.OPENAI_API_KEY?.trim() && !process.env.ANTHROPIC_API_KEY?.trim()) {
+      throw new BadRequestException('OPENAI_API_KEY or ANTHROPIC_API_KEY is required for idea generation');
     }
 
     const site = await this.prisma.site.findUnique({ where: { id: siteId } });
@@ -61,9 +64,11 @@ export class IdeasService {
           backoff: { type: 'exponential', delay: 2000 },
         },
       );
+      this.logger.log(`Ideas generation job ${String(job.id)} queued for site ${siteId} (org ${orgId})`);
       await this.queueStats.emitForOrg(orgId);
       return { jobId: String(job.id), status: 'queued' as const };
     } catch (e) {
+      this.logger.error(`Failed to enqueue ideas generation for site ${siteId}: ${e instanceof Error ? e.message : String(e)}`);
       await this.prisma.site.update({ where: { id: siteId }, data: { status: 'idle' } });
       throw e;
     }
@@ -199,6 +204,7 @@ export class IdeasService {
       where: { id: { in: dto.ids } },
       data: { status: dto.status },
     });
+    this.logger.log(`Bulk status update: ${ideas.length} ideas set to "${dto.status}" for org ${orgId}`);
     for (const row of ideas) {
       this.events.emitIdeaUpdated(orgId, {
         ideaId: row.id,
@@ -313,6 +319,7 @@ export class IdeasService {
       },
     });
 
+    this.logger.debug(`Idea ${ideaId} patched for org ${orgId} (status=${updated.status})`);
     this.events.emitIdeaUpdated(orgId, {
       ideaId: updated.id,
       siteId: updated.siteId,

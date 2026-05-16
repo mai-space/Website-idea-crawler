@@ -113,7 +113,8 @@ export class CrawlerService {
     try {
       await this.startCrawl(orgId, siteId, {}, { triggeredBy: 'scheduled' });
       return true;
-    } catch {
+    } catch (err: unknown) {
+      this.logger.warn(`Scheduled crawl skipped for site ${siteId}: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }
@@ -133,6 +134,9 @@ export class CrawlerService {
         where: { id: activeJob.id },
         data: { status: 'stopped', finishedAt: new Date() },
       });
+      this.logger.log(`Crawl job ${activeJob.id} stopped for site ${siteId}`);
+    } else {
+      this.logger.warn(`stopCrawl called for site ${siteId} but no active job found — resetting status anyway`);
     }
 
     await this.prisma.site.update({ where: { id: siteId }, data: { status: 'idle' } });

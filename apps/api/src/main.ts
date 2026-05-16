@@ -26,7 +26,6 @@ async function bootstrap() {
     process.on(signal, async () => {
       logger.log(`Received ${signal} — shutting down gracefully`);
       await app.close();
-      process.exit(0);
     });
   }
 }

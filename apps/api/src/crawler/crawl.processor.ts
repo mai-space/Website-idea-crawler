@@ -241,7 +241,7 @@ export class CrawlProcessor extends WorkerHost {
         data: { pagesCrawled: { increment: 1 } },
       });
       if (updated.pagesCrawled >= updated.pagesTotal && updated.pagesTotal > 0) {
-        this.logger.log(`Crawl job ${crawlJobId} finalised after skipped page: ${updated.pagesCrawled}/${updated.pagesTotal}`);
+        this.logger.log(`Crawl job ${crawlJobId} finalized after skipped page: ${updated.pagesCrawled}/${updated.pagesTotal}`);
         await this.finalizeCrawlJob(crawlJobId, orgId, siteId);
       }
     } catch (err: unknown) {

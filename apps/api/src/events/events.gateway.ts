@@ -63,11 +63,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return;
     }
 
-    const orgId = client.data.orgId as string | undefined;
-    if (!orgId) {
-      this.logger.warn(`Client ${client.id} tried to subscribe to site ${siteId} without authenticated orgId — ignoring`);
-      return;
-    }
+    // orgId is always set during handleConnection for authenticated clients.
+    const orgId = client.data.orgId as string;
 
     const site = await this.prisma.site.findFirst({
       where: { id: siteId, orgId },

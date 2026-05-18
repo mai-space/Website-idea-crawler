@@ -30,9 +30,10 @@ export class IdeasService {
   async enqueueGenerate(orgId: string, siteId: string) {
     const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
     const openaiKey = process.env.OPENAI_API_KEY?.trim();
-    const hasAnthropic = anthropicKey && !anthropicKey.startsWith('sk-ant-...');
-    const hasOpenAI = openaiKey && !openaiKey.startsWith('sk-...');
-    if (!hasAnthropic && !hasOpenAI) {
+    // Reject missing keys and placeholder values from .env.example
+    const anthropicReady = Boolean(anthropicKey && !anthropicKey.startsWith('sk-ant-...'));
+    const openaiReady = Boolean(openaiKey && !openaiKey.startsWith('sk-...'));
+    if (!anthropicReady && !openaiReady) {
       throw new BadRequestException('OPENAI_API_KEY or ANTHROPIC_API_KEY is required for idea generation');
     }
 

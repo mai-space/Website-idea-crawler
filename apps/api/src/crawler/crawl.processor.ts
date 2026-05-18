@@ -225,14 +225,7 @@ export class CrawlProcessor extends WorkerHost {
 
     if (updated.pagesCrawled >= updated.pagesTotal && updated.pagesTotal > 0) {
       this.logger.log(`Crawl job ${crawlJobId} completed: ${updated.pagesCrawled}/${updated.pagesTotal} pages for site ${siteId}`);
-      await this.prisma.$transaction([
-        this.prisma.crawlJob.update({
-          where: { id: crawlJobId },
-          data: { status: 'done', finishedAt: new Date() },
-        }),
-        this.prisma.site.update({ where: { id: siteId }, data: { status: 'idle' } }),
-      ]);
-      this.events.emitJobUpdate(orgId, { jobId: crawlJobId, siteId, status: 'done', progress: 100 });
+      await this.finalizeCrawlJob(crawlJobId, orgId, siteId);
     }
   }
 
@@ -249,17 +242,22 @@ export class CrawlProcessor extends WorkerHost {
       });
       if (updated.pagesCrawled >= updated.pagesTotal && updated.pagesTotal > 0) {
         this.logger.log(`Crawl job ${crawlJobId} finalised after skipped page: ${updated.pagesCrawled}/${updated.pagesTotal}`);
-        await this.prisma.$transaction([
-          this.prisma.crawlJob.update({
-            where: { id: crawlJobId },
-            data: { status: 'done', finishedAt: new Date() },
-          }),
-          this.prisma.site.update({ where: { id: siteId }, data: { status: 'idle' } }),
-        ]);
-        this.events.emitJobUpdate(orgId, { jobId: crawlJobId, siteId, status: 'done', progress: 100 });
+        await this.finalizeCrawlJob(crawlJobId, orgId, siteId);
       }
     } catch (err: unknown) {
       this.logger.warn(`recordSkippedPage failed for job ${crawlJobId}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** Atomically mark a crawl job as done and reset the site to idle. */
+  private async finalizeCrawlJob(crawlJobId: string, orgId: string, siteId: string) {
+    await this.prisma.$transaction([
+      this.prisma.crawlJob.update({
+        where: { id: crawlJobId },
+        data: { status: 'done', finishedAt: new Date() },
+      }),
+      this.prisma.site.update({ where: { id: siteId }, data: { status: 'idle' } }),
+    ]);
+    this.events.emitJobUpdate(orgId, { jobId: crawlJobId, siteId, status: 'done', progress: 100 });
   }
 }

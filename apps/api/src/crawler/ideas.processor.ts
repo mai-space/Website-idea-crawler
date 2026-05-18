@@ -243,10 +243,10 @@ export class IdeasProcessor extends WorkerHost {
         this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'running', progress });
       }
 
-      // If every persist call failed (and at least one threw), it is likely an
+      // If every persist call threw (and at least one was attempted), it is likely an
       // infrastructure failure (DB down, vector extension unavailable, etc.).
       // Re-throw so BullMQ can retry the job rather than silently reporting success.
-      if (lastPersistError !== null && persistedCount === 0 && rawIdeas.length > 0) {
+      if (lastPersistError !== null && persistedCount === 0) {
         this.logger.error(`All ${rawIdeas.length} idea(s) failed to persist for site ${siteId} — rethrowing for BullMQ retry`);
         throw lastPersistError;
       }

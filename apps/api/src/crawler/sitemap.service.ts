@@ -58,12 +58,17 @@ export class SitemapService {
         timeout: this.timeoutMs,
         headers: { 'User-Agent': USER_AGENT },
       });
-      return (data as string)
+      const found = (data as string)
         .split(/\r?\n/)
         .filter((l) => /^sitemap\s*:/i.test(l))
         .map((l) => l.replace(/^sitemap\s*:\s*/i, '').trim())
         .filter(Boolean);
-    } catch {
+      if (found.length > 0) {
+        this.logger.debug(`Found ${found.length} sitemap(s) in robots.txt for ${origin}`);
+      }
+      return found;
+    } catch (err: unknown) {
+      this.logger.debug(`robots.txt not accessible for ${origin}: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     }
   }
@@ -112,15 +117,24 @@ export class SitemapService {
 
     // Regular sitemap — contains <url><loc>…</loc></url> entries
     const urls: string[] = [];
+    let skipped = 0;
     for (const el of $('url > loc').toArray()) {
       if (urls.length >= maxUrls) break;
       const loc = $(el).text().trim();
       if (!loc) continue;
-      if (SKIPPED_EXTENSIONS.test(loc)) continue;
+      if (SKIPPED_EXTENSIONS.test(loc)) {
+        skipped++;
+        continue;
+      }
       try {
         const u = new URL(loc);
         if (u.origin === origin) urls.push(loc);
-      } catch {}
+      } catch (err: unknown) {
+        this.logger.debug(`Skipping malformed URL in sitemap ${url}: "${loc}" — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (skipped > 0) {
+      this.logger.debug(`Skipped ${skipped} non-HTML URLs (assets/media) in sitemap ${url}`);
     }
     return urls.slice(0, maxUrls);
   }

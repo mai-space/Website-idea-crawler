@@ -5,24 +5,79 @@ import {
   OnGatewayDisconnect,
   SubscribeMessage,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { PrismaService } from '../prisma/prisma.service';
+
+interface JwtPayload {
+  sub: string;
+  email: string;
+  orgId: string;
+  role: string;
+}
 
 @WebSocketGateway({
   cors: { origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true },
 })
 export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
+  private readonly logger = new Logger(EventsGateway.name);
+
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   handleConnection(client: Socket) {
-    const orgId = client.handshake.query.orgId as string;
-    if (orgId) client.join(`org:${orgId}`);
+    const token = (client.handshake.auth as Record<string, unknown>)?.token as string | undefined;
+    if (!token) {
+      this.logger.warn(`Client ${client.id} connected without a JWT token — disconnecting`);
+      client.disconnect(true);
+      return;
+    }
+
+    let payload: JwtPayload;
+    try {
+      payload = this.jwtService.verify<JwtPayload>(token);
+    } catch (err: unknown) {
+      this.logger.warn(`Client ${client.id} provided an invalid JWT token — disconnecting: ${err instanceof Error ? err.message : String(err)}`);
+      client.disconnect(true);
+      return;
+    }
+
+    const orgId = payload.orgId;
+    client.data.orgId = orgId;
+    client.join(`org:${orgId}`);
+    this.logger.debug(`Client ${client.id} authenticated and joined org:${orgId}`);
   }
 
-  handleDisconnect(_client: Socket) {}
+  handleDisconnect(client: Socket) {
+    this.logger.debug(`Client ${client.id} disconnected`);
+  }
 
   @SubscribeMessage('subscribe:site')
-  handleSubscribeSite(client: Socket, siteId: string) {
+  async handleSubscribeSite(client: Socket, siteId: string) {
+    if (!siteId) {
+      this.logger.warn(`Client ${client.id} tried to subscribe to a site without providing siteId`);
+      return;
+    }
+
+    // orgId is always set during handleConnection for authenticated clients.
+    const orgId = client.data.orgId as string;
+
+    const site = await this.prisma.site.findFirst({
+      where: { id: siteId, orgId },
+      select: { id: true },
+    });
+
+    if (!site) {
+      this.logger.warn(`Client ${client.id} (org ${orgId}) attempted to subscribe to unauthorized site ${siteId}`);
+      return;
+    }
+
     client.join(`site:${siteId}`);
+    this.logger.debug(`Client ${client.id} subscribed to site:${siteId}`);
   }
 
   emitJobUpdate(orgId: string, payload: { jobId: string; siteId: string; status: string; progress: number }) {
@@ -38,6 +93,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   emitError(orgId: string, payload: { siteId: string; type: string; message: string; retryable: boolean }) {
+    this.logger.warn(`Emitting error event to org ${orgId}: [${payload.type}] ${payload.message} (retryable=${payload.retryable})`);
     this.server.to(`org:${orgId}`).emit('error.new', payload);
   }
 

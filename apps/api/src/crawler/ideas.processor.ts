@@ -222,20 +222,44 @@ export class IdeasProcessor extends WorkerHost {
         rawIdeas = await this.generateWithOpenAI(openai!, bundle);
       }
 
+      this.logger.log(`AI returned ${rawIdeas.length} raw ideas for site ${siteId}`);
+
       const cms = site.cms as CmsType;
       let progress = 10;
       const step = Math.max(5, Math.floor(80 / Math.max(rawIdeas.length, 1)));
 
+      let persistedCount = 0;
+      let lastPersistError: unknown = null;
+
       for (const raw of rawIdeas.slice(0, MAX_IDEAS_PER_RUN)) {
         progress = Math.min(95, progress + step);
-        await this.persistOneIdea(openai, orgId, siteId, cms, raw, site.pages, site.name);
+        try {
+          await this.persistOneIdea(openai, orgId, siteId, cms, raw, site.pages, site.name);
+          persistedCount++;
+        } catch (err: unknown) {
+          lastPersistError = err;
+          this.logger.warn(`Failed to persist idea "${raw.title ?? '(no title)'}": ${err instanceof Error ? err.message : String(err)}`);
+        }
         this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'running', progress });
+      }
+
+      // If every persist call threw (and at least one was attempted), it is likely an
+      // infrastructure failure (DB down, vector extension unavailable, etc.).
+      // Re-throw so BullMQ can retry the job rather than silently reporting success.
+      if (lastPersistError !== null && persistedCount === 0) {
+        this.logger.error(`All ${rawIdeas.length} idea(s) failed to persist for site ${siteId} — rethrowing for BullMQ retry`);
+        throw lastPersistError;
+      }
+
+      if (persistedCount > 0) {
+        this.logger.log(`Persisted ${persistedCount} idea(s) for site ${siteId}`);
       }
 
       this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'done', progress: 100 });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       const attempts = job.opts.attempts ?? 2;
+      this.logger.error(`Ideas job failed for site ${siteId} (attempt ${job.attemptsMade + 1}/${attempts}): ${message}`, err instanceof Error ? err.stack : undefined);
       if (job.attemptsMade >= attempts) {
         this.events.emitError(orgId, { siteId, type: 'ideas_error', message, retryable: true });
         this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'failed', progress: 0 });
@@ -251,25 +275,31 @@ export class IdeasProcessor extends WorkerHost {
   // Claude — tool_use gives reliable structured output without JSON mode
   // ---------------------------------------------------------------------------
   private async generateWithClaude(client: Anthropic, bundle: ContextBundle): Promise<RawIdea[]> {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      tools: [
-        {
-          name: 'record_ideas',
-          description: `Record up to ${MAX_IDEAS_PER_RUN} website improvement ideas for the given site.`,
-          input_schema: IDEAS_RESPONSE_SCHEMA,
-        },
-      ],
-      tool_choice: { type: 'tool', name: 'record_ideas' },
-      messages: [
-        {
-          role: 'user',
-          content: `Analyse this site context and record the most valuable improvement ideas.\n\nContext bundle:\n${JSON.stringify(bundle, null, 2)}`,
-        },
-      ],
-    });
+    let response: Awaited<ReturnType<typeof client.messages.create>>;
+    try {
+      response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT,
+        tools: [
+          {
+            name: 'record_ideas',
+            description: `Record up to ${MAX_IDEAS_PER_RUN} website improvement ideas for the given site.`,
+            input_schema: IDEAS_RESPONSE_SCHEMA,
+          },
+        ],
+        tool_choice: { type: 'tool', name: 'record_ideas' },
+        messages: [
+          {
+            role: 'user',
+            content: `Analyse this site context and record the most valuable improvement ideas.\n\nContext bundle:\n${JSON.stringify(bundle, null, 2)}`,
+          },
+        ],
+      });
+    } catch (err: unknown) {
+      this.logger.error(`Claude API call failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
 
     const toolBlock = response.content.find((b) => b.type === 'tool_use');
     if (toolBlock?.type !== 'tool_use') {
@@ -290,16 +320,22 @@ Return ONLY valid JSON matching this schema:
 ${JSON.stringify(IDEAS_RESPONSE_SCHEMA, null, 2)}
 Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with existingIdeasSummary; each idea must cite at least one sourcePageUrls from the bundle pages.`;
 
-    const completion = await client.chat.completions.create({
-      model: 'gpt-4o',
-      response_format: { type: 'json_object' },
-      temperature: 0.45,
-      max_tokens: 4500,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: `Context bundle:\n${JSON.stringify(bundle)}` },
-      ],
-    });
+    let completion: Awaited<ReturnType<typeof client.chat.completions.create>>;
+    try {
+      completion = await client.chat.completions.create({
+        model: 'gpt-4o',
+        response_format: { type: 'json_object' },
+        temperature: 0.45,
+        max_tokens: 4500,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: `Context bundle:\n${JSON.stringify(bundle)}` },
+        ],
+      });
+    } catch (err: unknown) {
+      this.logger.error(`OpenAI API call failed: ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
 
     const text = completion.choices[0]?.message?.content || '{}';
     try {
@@ -371,7 +407,10 @@ Rules: at most ${MAX_IDEAS_PER_RUN} ideas; avoid overlapping concepts with exist
         literal,
         DEDUP_THRESHOLD,
       );
-      if (dup.length > 0) return;
+      if (dup.length > 0) {
+        this.logger.debug(`Idea "${title}" skipped — duplicate detected (threshold=${DEDUP_THRESHOLD})`);
+        return;
+      }
 
       const sourceUrls: string[] = Array.isArray(raw.sourcePageUrls)
         ? raw.sourcePageUrls.map((u) => String(u).trim()).filter(Boolean)

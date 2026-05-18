@@ -45,6 +45,7 @@ export class ParseProcessor extends WorkerHost {
       return;
     }
 
+    this.logger.debug(`Parsing page ${pageId} (url: ${page.url})`);
     try {
       const { $, meta } = extractFromHtml(page.rawHtml);
       const cleaned = cleanForMainText($);
@@ -66,21 +67,31 @@ export class ParseProcessor extends WorkerHost {
       const client = this.getOpenAI();
       if (client && isPageMeaningful(bodyText)) {
         const input = bodyText.slice(0, 8000);
-        const emb = await client.embeddings.create({
-          model: 'text-embedding-3-small',
-          input,
-        });
-        const vector = emb.data[0]?.embedding;
-        if (vector?.length === 1536) {
-          const literal = `[${vector.join(',')}]`;
-          await this.prisma.$executeRawUnsafe(
-            `UPDATE pages SET embedding = $1::vector WHERE id = $2::uuid`,
-            literal,
-            pageId,
-          );
+        try {
+          const emb = await client.embeddings.create({
+            model: 'text-embedding-3-small',
+            input,
+          });
+          const vector = emb.data[0]?.embedding;
+          if (vector?.length === 1536) {
+            const literal = `[${vector.join(',')}]`;
+            await this.prisma.$executeRawUnsafe(
+              `UPDATE pages SET embedding = $1::vector WHERE id = $2::uuid`,
+              literal,
+              pageId,
+            );
+            this.logger.debug(`Embedding stored for page ${pageId}`);
+          } else {
+            this.logger.warn(`Unexpected embedding dimension for page ${pageId}: got ${vector?.length ?? 0}, expected 1536`);
+          }
+        } catch (err: unknown) {
+          this.logger.warn(`Embedding creation failed for page ${pageId}: ${err instanceof Error ? err.message : String(err)}`);
+          // Non-fatal — continue to persist the parsed metadata
         }
       } else if (!client) {
         this.logger.debug('OPENAI_API_KEY missing — skipped embedding');
+      } else {
+        this.logger.debug(`Page ${pageId} skipped for embedding — below meaningful word threshold`);
       }
 
       await this.prisma.page.update({
@@ -94,10 +105,12 @@ export class ParseProcessor extends WorkerHost {
         },
       });
 
+      this.logger.debug(`Page ${pageId} parsed successfully (type=${refinedType}, wordCount=${wc})`);
       this.events.emitCrawlPage(orgId, { siteId, url: page.url, pageType: refinedType });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       const attempts = job.opts.attempts ?? 2;
+      this.logger.warn(`Parse error for page ${pageId} (attempt ${job.attemptsMade + 1}/${attempts}): ${message}`);
       if (job.attemptsMade >= attempts) {
         const prev = typeof page.meta === 'object' && page.meta !== null ? (page.meta as Record<string, unknown>) : {};
         await this.prisma.page.update({

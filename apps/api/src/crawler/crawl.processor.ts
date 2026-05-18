@@ -40,6 +40,8 @@ export class CrawlProcessor extends WorkerHost {
     }
     if (crawlJob.pagesCrawled >= this.maxPages) {
       this.logger.debug(`Skipping page ${url} — max pages (${this.maxPages}) reached for job ${crawlJobId}`);
+      // Count this page as processed so pagesTotal can converge and the job can complete.
+      await this.recordSkippedPage(crawlJobId, orgId, siteId);
       return;
     }
 
@@ -48,6 +50,8 @@ export class CrawlProcessor extends WorkerHost {
       domain = new URL(url).hostname;
     } catch (err: unknown) {
       this.logger.warn(`Invalid URL in crawl job ${crawlJobId}: "${url}" — ${err instanceof Error ? err.message : String(err)}`);
+      // Count this page as processed so pagesTotal can converge and the job can complete.
+      await this.recordSkippedPage(crawlJobId, orgId, siteId);
       return;
     }
 
@@ -227,6 +231,30 @@ export class CrawlProcessor extends WorkerHost {
       });
       await this.prisma.site.update({ where: { id: siteId }, data: { status: 'idle' } });
       this.events.emitJobUpdate(orgId, { jobId: crawlJobId, siteId, status: 'done', progress: 100 });
+    }
+  }
+
+  /**
+   * Count a page that was skipped (invalid URL, max-pages cap, stopped job) as processed.
+   * This ensures `pagesCrawled` converges toward `pagesTotal` so the crawl can complete.
+   */
+  private async recordSkippedPage(crawlJobId: string, orgId: string, siteId: string) {
+    try {
+      const updated = await this.prisma.crawlJob.update({
+        where: { id: crawlJobId },
+        data: { pagesCrawled: { increment: 1 } },
+      });
+      if (updated.pagesCrawled >= updated.pagesTotal && updated.pagesTotal > 0) {
+        this.logger.log(`Crawl job ${crawlJobId} finalised after skipped page: ${updated.pagesCrawled}/${updated.pagesTotal}`);
+        await this.prisma.crawlJob.update({
+          where: { id: crawlJobId },
+          data: { status: 'done', finishedAt: new Date() },
+        });
+        await this.prisma.site.update({ where: { id: siteId }, data: { status: 'idle' } });
+        this.events.emitJobUpdate(orgId, { jobId: crawlJobId, siteId, status: 'done', progress: 100 });
+      }
+    } catch (err: unknown) {
+      this.logger.warn(`recordSkippedPage failed for job ${crawlJobId}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

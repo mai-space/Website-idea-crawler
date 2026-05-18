@@ -12,8 +12,9 @@ export function useSocket() {
   useEffect(() => {
     if (!user?.orgId) return;
 
+    const token = localStorage.getItem('sb_token') ?? '';
     const socket = io('/', {
-      query: { orgId: user.orgId },
+      auth: { token },
       transports: ['websocket'],
     });
     socketRef.current = socket;

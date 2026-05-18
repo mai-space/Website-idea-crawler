@@ -28,7 +28,11 @@ export class IdeasService {
   ) {}
 
   async enqueueGenerate(orgId: string, siteId: string) {
-    if (!process.env.OPENAI_API_KEY?.trim() && !process.env.ANTHROPIC_API_KEY?.trim()) {
+    const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
+    const openaiKey = process.env.OPENAI_API_KEY?.trim();
+    const hasAnthropic = anthropicKey && !anthropicKey.startsWith('sk-ant-...');
+    const hasOpenAI = openaiKey && openaiKey !== 'sk-...';
+    if (!hasAnthropic && !hasOpenAI) {
       throw new BadRequestException('OPENAI_API_KEY or ANTHROPIC_API_KEY is required for idea generation');
     }
 

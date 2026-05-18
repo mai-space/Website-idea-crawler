@@ -228,14 +228,31 @@ export class IdeasProcessor extends WorkerHost {
       let progress = 10;
       const step = Math.max(5, Math.floor(80 / Math.max(rawIdeas.length, 1)));
 
+      let persistedCount = 0;
+      let lastPersistError: unknown = null;
+
       for (const raw of rawIdeas.slice(0, MAX_IDEAS_PER_RUN)) {
         progress = Math.min(95, progress + step);
         try {
           await this.persistOneIdea(openai, orgId, siteId, cms, raw, site.pages, site.name);
+          persistedCount++;
         } catch (err: unknown) {
+          lastPersistError = err;
           this.logger.warn(`Failed to persist idea "${raw.title ?? '(no title)'}": ${err instanceof Error ? err.message : String(err)}`);
         }
         this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'running', progress });
+      }
+
+      // If every persist call failed (and at least one threw), it is likely an
+      // infrastructure failure (DB down, vector extension unavailable, etc.).
+      // Re-throw so BullMQ can retry the job rather than silently reporting success.
+      if (lastPersistError !== null && persistedCount === 0 && rawIdeas.length > 0) {
+        this.logger.error(`All ${rawIdeas.length} idea(s) failed to persist for site ${siteId} — rethrowing for BullMQ retry`);
+        throw lastPersistError;
+      }
+
+      if (persistedCount > 0) {
+        this.logger.log(`Persisted ${persistedCount} idea(s) for site ${siteId}`);
       }
 
       this.events.emitJobUpdate(orgId, { jobId: String(job.id), siteId, status: 'done', progress: 100 });

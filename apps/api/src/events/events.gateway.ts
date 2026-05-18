@@ -6,7 +6,16 @@ import {
   SubscribeMessage,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { PrismaService } from '../prisma/prisma.service';
+
+interface JwtPayload {
+  sub: string;
+  email: string;
+  orgId: string;
+  role: string;
+}
 
 @WebSocketGateway({
   cors: { origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true },
@@ -15,14 +24,34 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
   private readonly logger = new Logger(EventsGateway.name);
 
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
   handleConnection(client: Socket) {
-    const orgId = client.handshake.query.orgId as string;
-    if (orgId) {
-      client.join(`org:${orgId}`);
-      this.logger.debug(`Client ${client.id} connected and joined org:${orgId}`);
-    } else {
-      this.logger.warn(`Client ${client.id} connected without orgId — not joined to any room`);
+    const token = (client.handshake.auth as Record<string, unknown>)?.token as string | undefined;
+    if (!token) {
+      this.logger.warn(`Client ${client.id} connected without a JWT token — disconnecting`);
+      client.disconnect(true);
+      return;
     }
+
+    let payload: JwtPayload;
+    try {
+      payload = this.jwtService.verify<JwtPayload>(token, {
+        secret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
+      });
+    } catch (err: unknown) {
+      this.logger.warn(`Client ${client.id} provided an invalid JWT token — disconnecting: ${err instanceof Error ? err.message : String(err)}`);
+      client.disconnect(true);
+      return;
+    }
+
+    const orgId = payload.orgId;
+    client.data.orgId = orgId;
+    client.join(`org:${orgId}`);
+    this.logger.debug(`Client ${client.id} authenticated and joined org:${orgId}`);
   }
 
   handleDisconnect(client: Socket) {
@@ -30,11 +59,28 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('subscribe:site')
-  handleSubscribeSite(client: Socket, siteId: string) {
+  async handleSubscribeSite(client: Socket, siteId: string) {
     if (!siteId) {
       this.logger.warn(`Client ${client.id} tried to subscribe to a site without providing siteId`);
       return;
     }
+
+    const orgId = client.data.orgId as string | undefined;
+    if (!orgId) {
+      this.logger.warn(`Client ${client.id} tried to subscribe to site ${siteId} without authenticated orgId — ignoring`);
+      return;
+    }
+
+    const site = await this.prisma.site.findFirst({
+      where: { id: siteId, orgId },
+      select: { id: true },
+    });
+
+    if (!site) {
+      this.logger.warn(`Client ${client.id} (org ${orgId}) attempted to subscribe to unauthorized site ${siteId}`);
+      return;
+    }
+
     client.join(`site:${siteId}`);
     this.logger.debug(`Client ${client.id} subscribed to site:${siteId}`);
   }

@@ -1,6 +1,7 @@
-import { Injectable, UnauthorizedException, ConflictException, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, Logger, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -58,19 +59,22 @@ export class AuthService {
     let org: { id: string };
     let user: { id: string; email: string; orgId: string; role: string; passwordHash: string };
     try {
-      org = await this.prisma.organization.create({
-        data: { name: dto.orgName },
+      const passwordHash = await bcrypt.hash(dto.password, 10);
+      const result = await this.prisma.$transaction(async (tx) => {
+        const createdOrg = await tx.organization.create({ data: { name: dto.orgName } });
+        const createdUser = await tx.user.create({
+          data: {
+            orgId: createdOrg.id,
+            email: dto.email,
+            passwordHash,
+            name: dto.name,
+            role: 'admin',
+          },
+        });
+        return { org: createdOrg, user: createdUser };
       });
-
-      user = await this.prisma.user.create({
-        data: {
-          orgId: org.id,
-          email: dto.email,
-          passwordHash: await bcrypt.hash(dto.password, 10),
-          name: dto.name,
-          role: 'admin',
-        },
-      });
+      org = result.org;
+      user = result.user;
     } catch (err: unknown) {
       this.logger.error(`DB error during registration for ${dto.email}: ${err instanceof Error ? err.message : String(err)}`);
       throw new InternalServerErrorException('Registration failed');
@@ -90,7 +94,10 @@ export class AuthService {
       return safe;
     } catch (err: unknown) {
       this.logger.error(`Failed to load profile for user ${userId}: ${err instanceof Error ? err.message : String(err)}`);
-      throw err;
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+        throw new NotFoundException('User not found');
+      }
+      throw new InternalServerErrorException('Failed to load profile');
     }
   }
 

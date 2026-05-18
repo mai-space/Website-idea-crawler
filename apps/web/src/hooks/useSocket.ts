@@ -13,6 +13,7 @@ export function useSocket() {
     if (!user?.orgId) return;
 
     const token = localStorage.getItem('sb_token') ?? '';
+    if (!token) return;
     const socket = io('/', {
       auth: { token },
       transports: ['websocket'],

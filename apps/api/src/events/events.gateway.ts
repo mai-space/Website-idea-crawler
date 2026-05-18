@@ -39,9 +39,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     let payload: JwtPayload;
     try {
-      payload = this.jwtService.verify<JwtPayload>(token, {
-        secret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
-      });
+      payload = this.jwtService.verify<JwtPayload>(token);
     } catch (err: unknown) {
       this.logger.warn(`Client ${client.id} provided an invalid JWT token — disconnecting: ${err instanceof Error ? err.message : String(err)}`);
       client.disconnect(true);
